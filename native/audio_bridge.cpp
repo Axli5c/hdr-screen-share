@@ -48,13 +48,22 @@ static WAVEFORMATEX Format() {
     value.nBlockAlign = 8; value.nAvgBytesPerSec = 384000;
     return value;
 }
+static uint64_t HandleCreationTime(HANDLE process) {
+    FILETIME created{}, ended{}, kernel{}, user{};
+    BOOL ok = GetProcessTimes(process, &created, &ended, &kernel, &user);
+    return ok ? (uint64_t(created.dwHighDateTime) << 32) | created.dwLowDateTime : 0;
+}
 static uint64_t CreationTime(DWORD pid) {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process) return 0;
-    FILETIME created{}, ended{}, kernel{}, user{};
-    BOOL ok = GetProcessTimes(process, &created, &ended, &kernel, &user);
-    CloseHandle(process);
-    return ok ? (uint64_t(created.dwHighDateTime) << 32) | created.dwLowDateTime : 0;
+    uint64_t result = HandleCreationTime(process);
+    CloseHandle(process); return result;
+}
+static bool ConfirmedExited(DWORD pid) {
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!process) return GetLastError() == ERROR_INVALID_PARAMETER;
+    bool exited = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    CloseHandle(process); return exited;
 }
 static DWORD AudioServicePid() {
     // A render session owned by Windows Audio may relay device monitoring.
@@ -112,12 +121,17 @@ public:
 struct Capture {
     uint32_t pid = 0;
     uint64_t created = 0;
+    HANDLE process = nullptr;
     ComPtr<IAudioClient> client;
     ComPtr<IAudioCaptureClient> reader;
-    ~Capture() { if (client) client->Stop(); }
+    ~Capture() { if (client) client->Stop(); if (process) CloseHandle(process); }
 };
 static std::unique_ptr<Capture> OpenCapture(const AbProcessInfo& process, std::atomic<bool>& stop) {
-    if (process.pid == GetCurrentProcessId() || CreationTime(process.pid) != process.created_at)
+    if (process.pid == GetCurrentProcessId())
+        throw Failure{E_ACCESSDENIED};
+    auto result = std::make_unique<Capture>();
+    result->process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, process.pid);
+    if (!result->process || HandleCreationTime(result->process) != process.created_at)
         throw Failure{E_ACCESSDENIED};
     auto completion = Microsoft::WRL::Make<Activation>();
     if (!completion || !completion->done) throw Failure{E_OUTOFMEMORY};
@@ -132,7 +146,6 @@ static std::unique_ptr<Capture> OpenCapture(const AbProcessInfo& process, std::a
         if (stop || ++waits > 400) throw Failure{HRESULT_FROM_WIN32(ERROR_TIMEOUT)};
     }
     Check(completion->status);
-    auto result = std::make_unique<Capture>();
     result->pid = process.pid; result->created = process.created_at;
     result->client = completion->client;
     auto format = Format();
@@ -188,8 +201,15 @@ struct Relay {
                     for (const auto& root : roots) captures.push_back(OpenCapture(root, stop));
                     applied = next;
                 }
-                for (auto& capture : captures) {
-                    if (CreationTime(capture->pid) != capture->created) throw Failure{E_ACCESSDENIED};
+                for (auto iterator = captures.begin(); iterator != captures.end();) {
+                    auto& capture = *iterator;
+                    DWORD state = WaitForSingleObject(capture->process, 0);
+                    if (state == WAIT_OBJECT_0) {
+                        mixer.remove(capture->pid);
+                        iterator = captures.erase(iterator);
+                        continue;
+                    }
+                    if (state != WAIT_TIMEOUT) throw Failure{E_ACCESSDENIED};
                     UINT32 available = 0; Check(capture->reader->GetNextPacketSize(&available));
                     while (available) {
                         BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
@@ -198,6 +218,7 @@ struct Relay {
                         Check(capture->reader->ReleaseBuffer(frames));
                         Check(capture->reader->GetNextPacketSize(&available));
                     }
+                    ++iterator;
                 }
                 UINT32 padding = 0; Check(output->GetCurrentPadding(&padding));
                 UINT32 available = capacity - std::min(padding, capacity);
@@ -286,7 +307,7 @@ AB_API ab_list_audio_pids(uint32_t* buffer, uint32_t capacity, uint32_t* count) 
                     skippedSystemSounds = true;
                     continue;
                 }
-                if (pid) pids.insert(pid); // protected/system PID 0 has no process tree.
+                if (pid && !ConfirmedExited(pid)) pids.insert(pid);
             }
         }
         HRESULT result = CopyList(std::vector<uint32_t>(pids.begin(), pids.end()), buffer, capacity, count);

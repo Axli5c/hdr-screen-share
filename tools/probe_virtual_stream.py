@@ -17,8 +17,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seconds', type=int, default=6)
     parser.add_argument('--fps', type=int, default=4)
+    parser.add_argument('--warmup', type=int, default=0)
     args = parser.parse_args()
-    if not 3 <= args.seconds <= 75 or not 1 <= args.fps <= 60:
+    if not 3 <= args.seconds <= 75 or not 1 <= args.fps <= 60 or not 0 <= args.warmup <= 10:
         parser.error('seconds must be 3..75 and fps 1..60')
     enable_physical_pixels()
     before = list_sources()
@@ -79,14 +80,25 @@ def main():
                     session.close()
 
         worker = threading.Thread(target=capture, daemon=True)
-        started = time.monotonic()
+        measure = {'started': time.monotonic(), 'presented': 0}
+        def begin_measurement():
+            measure['started'] = time.monotonic()
+            measure['presented'] = output.presented
+            results['frames'] = results['unique_captures'] = 0
+        if args.warmup:
+            QTimer.singleShot(args.warmup * 1000, begin_measurement)
         QTimer.singleShot(500, worker.start)
-        QTimer.singleShot(args.seconds * 1000, app.quit)
+        finish_timer = QTimer()
+        finish_timer.setSingleShot(True)
+        finish_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        finish_timer.timeout.connect(app.quit)
+        finish_timer.start((args.seconds + args.warmup) * 1000)
         app.exec()
-        results['elapsed'] = time.monotonic() - started
-        results['presented'] = output.presented
-        results['render_fps'] = output.presented / results['elapsed']
-        results['window_capture_fps'] = results['unique_captures'] / max(.001, results['elapsed'] - .5)
+        results['elapsed'] = time.monotonic() - measure['started']
+        results['warmup_seconds'] = args.warmup
+        results['presented'] = output.presented - measure['presented']
+        results['render_fps'] = results['presented'] / results['elapsed']
+        results['window_capture_fps'] = results['unique_captures'] / max(.001, results['elapsed'] - (0 if args.warmup else .5))
     finally:
         stop.set()
         if worker is not None and worker.ident is not None:

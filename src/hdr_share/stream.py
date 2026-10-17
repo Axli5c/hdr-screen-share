@@ -135,9 +135,9 @@ class StreamController(QObject):
             worker, self.worker = self.worker, None
             worker.deleteLater()
         if self.lease is not None:
-            lease, self.lease = self.lease, None
             try:
-                lease.release()
+                self.lease.release()
+                self.lease = None
             except Exception as error:
                 self.video_status = f'Не удалось освободить виртуальный дисплей: {error}'
                 self.changed.emit()
@@ -165,6 +165,11 @@ class StreamController(QObject):
             self.display_changed()
         if self.audio is not None and self.audio.last_error:
             self.audio_status = f'Звук отключён: {self.audio.last_error}'
+            self.changed.emit()
+        elif self.audio is not None:
+            self.audio_status = 'Звук приложений · без Discord и микрофона'
+            if getattr(self.audio, 'warning', ''):
+                self.audio_status += '\n' + self.audio.warning
             self.changed.emit()
 
     def present_latest(self):

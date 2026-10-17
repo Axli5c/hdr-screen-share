@@ -156,7 +156,7 @@ class DeviceSetupDialog(QDialog):
             self.timer.stop()
             self.installer = None
             if code:
-                self.failed(f'Установщик вернул код {code}. Проверьте README и журнал установки.')
+                self.failed(f'Установщик вернул код {code}. Журнал: %LOCALAPPDATA%/HDRScreenShare/device-install.log')
             else:
                 backend = WindowsDisplayBackend()
                 if backend.owned_display() is not None:

@@ -23,5 +23,11 @@ int main() {
     assert(mixer.queued_frames() == 0);
     mixer.mix(output, 2);
     assert(output[0] == 0);
+    mixer.push(10, first, 2);
+    mixer.push(20, second, 2);
+    mixer.remove(10);
+    mixer.mix(output, 2);
+    assert(std::abs(output[0] - 0.3f) < 0.00001f);
+    assert(std::abs(output[1] - 0.4f) < 0.00001f);
     std::cout << "audio mixer tests passed\n";
 }

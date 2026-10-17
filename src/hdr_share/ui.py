@@ -236,7 +236,7 @@ class ControlWindow(QWidget):
         self.status.setText(self.controller.video_status)
         self.audio_status.setText(self.controller.audio_status)
         self.start_button.setEnabled(not self._running and self.monitors.count() > 0)
-        self.stop_button.setEnabled(self._running or self.worker is not None)
+        self.stop_button.setEnabled(self._running or self.worker is not None or self.controller.lease is not None)
         if not self._running:
             self.timer.stop()
 

@@ -32,9 +32,12 @@ class Desktop:
     def snapshot(self, identity):
         return self.current
 
-    def attach(self, identity, width, height):
+    def attachment_state(self, identity, width, height):
+        return ('active', width, height)
+
+    def attach(self, identity, width, height, *, state=None):
         self.events.append(('attach', identity, width, height))
-        self.current = ('active', width, height)
+        self.current = state if state is not None else self.attachment_state(identity, width, height)
         return CaptureSource(identity, 'Virtual SDR', False, False, width, height, 2)
 
     def restore(self, identity, before):
@@ -115,3 +118,47 @@ def test_native_lock_rejects_second_backend_on_same_thread():
     finally:
         second.unclaim()
         first.unclaim()
+
+
+def test_acquire_does_not_require_fallible_snapshot_after_attachment():
+    class UnstableAfterAttach(Desktop):
+        def snapshot(self, identity):
+            if self.current != 'detached':
+                raise RuntimeError('snapshot unavailable')
+            return super().snapshot(identity)
+    api = UnstableAfterAttach()
+    lease = DisplayLease('physical', 3840, 2160, backend=api)
+    assert lease.acquire().width == 3840
+    assert api.claimed
+    api.snapshot = lambda _: api.current
+    lease.release()
+    assert api.current == 'detached'
+
+
+def test_transient_detach_failure_can_be_retried_without_losing_ownership():
+    api = Desktop()
+    lease = DisplayLease('physical', 3840, 2160, backend=api)
+    lease.acquire()
+    original = api.restore
+    api.restore = lambda *args: (_ for _ in ()).throw(RuntimeError('temporary detach error'))
+    with pytest.raises(RuntimeError, match='temporary'):
+        lease.release()
+    assert api.claimed
+    api.restore = original
+    lease.release()
+    assert api.current == 'detached'
+    assert not api.claimed
+
+
+def test_failure_after_attach_rolls_back_before_unlocking():
+    api = Desktop()
+    original = api.attach
+    def attach(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError('post-attach failure')
+    api.attach = attach
+    lease = DisplayLease('physical', 3840, 2160, backend=api)
+    with pytest.raises(RuntimeError, match='post-attach'):
+        lease.acquire()
+    assert api.current == 'detached'
+    assert not api.claimed

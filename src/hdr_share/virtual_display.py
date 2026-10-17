@@ -18,7 +18,8 @@ class DisplayBackend(Protocol):
     def unclaim(self) -> None: ...
     def owned_display(self) -> str | None: ...
     def snapshot(self, identity: str): ...
-    def attach(self, identity: str, width: int, height: int) -> CaptureSource: ...
+    def attachment_state(self, identity: str, width: int, height: int): ...
+    def attach(self, identity: str, width: int, height: int, *, state) -> CaptureSource: ...
     def restore(self, identity: str, snapshot) -> None: ...
 
 
@@ -43,28 +44,33 @@ class DisplayLease:
             if identity == self.source_id:
                 raise DisplayLeaseError('Output cannot be captured as input')
             before = self.backend.snapshot(identity)
-            source = self.backend.attach(identity, self.width, self.height)
+            applied = self.backend.attachment_state(identity, self.width, self.height)
+            # Save the cleanup token before the first operation that can attach.
             self._identity, self._before = identity, before
-            self._applied = self.backend.snapshot(identity)
+            self._applied = applied
+            source = self.backend.attach(identity, self.width, self.height, state=applied)
             self._source = source
             return source
         except Exception:
-            self.backend.unclaim()
-            self._claimed = False
+            if self._identity is not None:
+                self.release()  # Failure retains ownership and the cleanup token.
+            else:
+                self.backend.unclaim()
+                self._claimed = False
             raise
 
     def release(self) -> None:
         if self._identity is None:
             return
         identity, before, applied = self._identity, self._before, self._applied
+        if self.backend.owned_display() == identity and self.backend.snapshot(identity) == applied:
+            self.backend.restore(identity, before)
+        # A vanished device/user edit is preserved. Exceptions above retain all
+        # state so stop/close can retry without another instance stealing it.
         self._identity = self._before = self._applied = self._source = None
-        try:
-            if self.backend.owned_display() == identity and self.backend.snapshot(identity) == applied:
-                self.backend.restore(identity, before)
-        finally:
-            if self._claimed:
-                self.backend.unclaim()
-                self._claimed = False
+        if self._claimed:
+            self.backend.unclaim()
+            self._claimed = False
 
 
 OWN_INSTANCE = r'ROOT\HDRSCREENSHAREVDD\0000'
@@ -244,21 +250,17 @@ class WindowsDisplayBackend:
         if status != 0:
             raise DisplayLeaseError(f'Windows rejected owned display mode: {status}')
 
-    def attach(self, identity, width, height):
+    def attachment_state(self, identity, width, height):
         physical = [source for source in list_sources() if source.id != identity]
         x = max((source.left + source.width for source in physical), default=0)
-        state = DisplayState(True, x, 0, width, height, 60, 32, 0)
-        before = self.snapshot(identity)
+        return DisplayState(True, x, 0, width, height, 60, 32, 0)
+
+    def attach(self, identity, width, height, *, state):
         self._apply(identity, state)
-        try:
-            source = next(source for source in list_sources() if source.id == identity)
-            if (source.width, source.height) != (width, height) or source.primary or source.hdr_enabled is not False:
-                raise DisplayLeaseError('Owned output must be SDR at the requested size')
-            return source
-        except Exception:
-            if self.snapshot(identity) == state:
-                self._apply(identity, before)
-            raise
+        source = next(source for source in list_sources() if source.id == identity)
+        if (source.width, source.height) != (width, height) or source.primary or source.hdr_enabled is not False:
+            raise DisplayLeaseError('Owned output must be SDR at the requested size')
+        return source
 
     def restore(self, identity, snapshot):
         self._apply(identity, snapshot)

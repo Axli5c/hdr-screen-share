@@ -82,3 +82,18 @@ def test_target_removal_stops_capture_and_hides_output(app):
     assert not worker.isRunning()
     assert not controller.running
     assert controller.output.isHidden()
+
+
+def test_transient_release_error_keeps_lease_for_retry(app):
+    controller, _, events = setup_controller(app)
+    controller.start('hdr')
+    lease = controller.lease
+    original = lease.release
+    lease.release = lambda: (_ for _ in ()).throw(RuntimeError('temporary detach error'))
+    assert not controller.stop()
+    assert controller.lease is lease
+    assert controller.output.isHidden()
+    lease.release = original
+    assert controller.stop()
+    assert controller.lease is None
+    assert events.count('release') == 1

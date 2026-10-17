@@ -4,6 +4,13 @@ param(
     [switch]$ResumePreparation
 )
 $ErrorActionPreference = 'Stop'
+$installLog = $null
+if (-not $VerifyOnly) {
+    $logDirectory = Join-Path $env:LOCALAPPDATA 'HDRScreenShare'
+    New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+    $installLog = Join-Path $logDirectory 'device-install.log'
+    Start-Transcript -LiteralPath $installLog -Append | Out-Null
+}
 # This helper installs only the dedicated display. VB-CABLE remains an independent
 # original vendor installation; its package is not integrated into our installer.
 $expected = 'F93E7CE3D640C83C419B1B72D2C83B2D8E34D83E8B7BA11F3328A40D2DA82FA4'
@@ -121,9 +128,13 @@ public static class HssDeviceSetup {
     & "$env:SystemRoot\System32\pnputil.exe" /add-driver (Join-Path $destination 'MttVDD.inf') /install
     if ($LASTEXITCODE -notin @(0,3010)) { throw "pnputil failed: $LASTEXITCODE. Preserve device for diagnosis." }
     Write-Output 'Dedicated signed VDD installed. No automatic reboot. Verify/detach it using the application device probe.'
+} catch {
+    $_ | Out-String | Write-Output
+    throw
 } finally {
     # The target is the GUID directory created above, never a user supplied path.
     if ($stage -and $stage.StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $stage -Recurse -Force
     }
+    if ($installLog) { Stop-Transcript | Out-Null }
 }

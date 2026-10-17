@@ -25,6 +25,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--list', action='store_true', help='Only enumerate render endpoints')
     parser.add_argument('--worker-pids', type=int, nargs=3, help=argparse.SUPPRESS)
+    parser.add_argument('--source-exit', action='store_true', help='Verify surviving audio when one source closes')
     args = parser.parse_args()
     bridge = NativeAudioBridge()
     endpoints = bridge.endpoints()
@@ -48,12 +49,16 @@ def main():
         handles = []
         try:
             for executable, frequency in ((tone, 700), (tone, 1100), (excluded, 1700)):
-                handles.append(subprocess.Popen([str(executable), str(frequency), '12'],
+                duration = '3' if args.source_exit and frequency == 700 else '12'
+                handles.append(subprocess.Popen([str(executable), str(frequency), duration],
                     creationflags=subprocess.CREATE_NO_WINDOW))
             # Relay and tone processes are siblings. Own-process descendants must
             # remain excluded, including when testing the real policy.
-            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--worker-pids',
-                *(str(process.pid) for process in handles)], capture_output=True, text=True,
+            command = [sys.executable, str(Path(__file__).resolve()), '--worker-pids',
+                *(str(process.pid) for process in handles)]
+            if args.source_exit:
+                command.append('--source-exit')
+            result = subprocess.run(command, capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW, timeout=25)
             print(result.stdout.strip())
             if result.stderr:
@@ -86,6 +91,11 @@ def main():
         stats = bridge.stats(relay)
         _check(stats['last_hresult'])
         result = analyze_tones(samples[24000:written.value])
+        if args.source_exit:
+            tail = analyze_tones(samples[written.value - 48000:written.value])
+            result['surviving_amplitude'] = tail['allowed_amplitudes'][1]
+            result['passed'] = (result['surviving_amplitude'] > .001 and
+                tail['excluded_amplitude'] < result['surviving_amplitude'] * .001)
         result['stats'] = stats
         result['defaults_unchanged'] = bridge.endpoints() == endpoints
         result['passed'] = result['passed'] and result['defaults_unchanged'] and stats['queued_frames'] <= 4800

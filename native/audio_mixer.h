@@ -44,5 +44,6 @@ public:
         return maximum;
     }
     uint64_t overflows() const { return overflows_; }
+    void remove(uint32_t pid) { sources_.erase(pid); }
     void clear() { sources_.clear(); }
 };
