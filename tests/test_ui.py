@@ -24,6 +24,64 @@ def control_for_test(app, sources, factory, autostart=True, affinity=lambda hwnd
         owned_display=lambda: target_id, affinity=affinity)
 
 
+def test_default_launch_waits_for_start_even_after_mode_and_comparison_change(app):
+    from test_stream import setup_controller
+    controller, sources, events = setup_controller(app)
+    window = ControlWindow(sources=lambda: sources, controller=controller,
+        owned_display=lambda: 'own', screen_lookup=lambda _: app.primaryScreen(),
+        affinity=lambda _: True)
+    try:
+        window.show()
+        app.processEvents()
+        assert not controller.running and controller.worker is None
+        assert 'acquire' not in events and 'audio-start' not in events
+        assert window.status.text() == 'Video: Ready'
+        assert window.display_status.text() == 'Display: off'
+        assert not window.compare_toggle.isChecked()
+        window.share_mode.setCurrentIndex(1)
+        window.compare_toggle.setChecked(True)
+        app.processEvents()
+        assert not controller.running and 'acquire' not in events
+        window.start_button.click()
+        pump(app, lambda: controller.worker is not None and controller.worker.captured > 0)
+        assert window.display_status.text().endswith('connected')
+        window.stop_button.click()
+        assert window.display_status.text() == 'Display: off'
+        assert window.audio_status.text() == 'Audio: off'
+        assert window.preview.image.isNull() and window.before_preview.image.isNull()
+    finally:
+        window.close()
+
+
+def test_comparison_keeps_distinct_before_after_and_full_output(app):
+    from test_stream import setup_controller
+    controller, sources, _ = setup_controller(app)
+    window = ControlWindow(sources=lambda: sources, controller=controller,
+        owned_display=lambda: 'own', screen_lookup=lambda _: app.primaryScreen(),
+        affinity=lambda _: True, autostart=False)
+    window.show()
+    window.compare_toggle.setChecked(True)
+    controller.running = True
+    before = np.full((135, 240, 4), (10, 20, 250, 255), np.uint8)
+    after = np.full((270, 480, 4), (30, 40, 100, 255), np.uint8)
+    worker = CaptureWorker('hdr', controller.frames)
+    controller.worker = worker
+    worker.comparison_frames.put(before)
+    worker.comparison_status = 'Live'
+    controller.frames.put(after)
+    window._verify_at = time.monotonic() + 10
+    window.present_preview()
+    window.present_latest()
+    assert window.before_preview.image.pixelColor(0, 0).red() == 250
+    assert window.preview.image.pixelColor(0, 0).red() == 100
+    assert window.output.image.pixelColor(0, 0).red() == 100
+    assert window.output.output_size == (480, 270)
+    window.compare_toggle.setChecked(False)
+    assert window.before_panel.isHidden()
+    assert window.before_preview.image.isNull()
+    window.close()
+
+
 def test_preview_does_not_reduce_stream_resolution(app):
     from hdr_share.ui import PreviewWidget
     pixels = np.zeros((2160, 3840, 4), np.uint8)

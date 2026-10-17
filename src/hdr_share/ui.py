@@ -4,7 +4,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPainter, QColor, QColorSpace
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-                              QLabel, QComboBox, QPushButton)
+                              QLabel, QComboBox, QPushButton, QCheckBox)
 
 from .capture import CaptureWorker
 from .frames import LatestFrame, fit_size
@@ -115,7 +115,7 @@ class PreviewWidget(QWidget):
     def set_frame(self, pixels):
         height, width, _ = pixels.shape
         image = QImage(pixels.data, width, height, pixels.strides[0], QImage.Format.Format_ARGB32)
-        self.image = image.scaled(480, 270, Qt.AspectRatioMode.KeepAspectRatio,
+        self.image = image.scaled(self.width(), self.height(), Qt.AspectRatioMode.KeepAspectRatio,
                                   Qt.TransformationMode.FastTransformation).copy()
         self.received += 1
         self.update()
@@ -135,7 +135,7 @@ class ControlWindow(QWidget):
     closed = Signal()
 
     def __init__(self, *, sources=list_sources, worker_factory=CaptureWorker,
-                 screen_lookup=screen_for_source, autostart=True, controller=None,
+                 screen_lookup=screen_for_source, autostart=False, controller=None,
                  owned_display=None, affinity=exclude_control_from_capture, default_mode="screen"):
         super().__init__()
         from .stream import StreamController
@@ -149,6 +149,7 @@ class ControlWindow(QWidget):
                                                         screen_lookup=screen_lookup)
         self.output = self.controller.output
         self._preview_sequence = 0
+        self._before_sequence = 0
         self._last_counts = (0, 0)
         self._last_stats_at = time.monotonic()
         self._verify_at = 0
@@ -181,8 +182,29 @@ class ControlWindow(QWidget):
         self.share_mode.addItem("Application window", "application")
         self.share_mode.setCurrentIndex(self.share_mode.findData(default_mode))
         layout.addWidget(self.share_mode)
+        self.compare_toggle = QCheckBox('Before / After')
+        layout.addWidget(self.compare_toggle)
+        previews = QHBoxLayout()
+        previews.setSpacing(8)
+        self.before_panel = QWidget()
+        before_layout = QVBoxLayout(self.before_panel)
+        before_layout.setContentsMargins(0, 0, 0, 0)
+        before_layout.addWidget(QLabel('Before · Unmapped'))
+        self.before_preview = PreviewWidget()
+        self.before_preview.setFixedSize(236, 133)
+        before_layout.addWidget(self.before_preview)
+        self.before_panel.hide()
+        previews.addWidget(self.before_panel)
+        after_panel = QWidget()
+        after_layout = QVBoxLayout(after_panel)
+        after_layout.setContentsMargins(0, 0, 0, 0)
+        self.after_label = QLabel('After · SDR')
+        self.after_label.hide()
+        after_layout.addWidget(self.after_label)
         self.preview = PreviewWidget()
-        layout.addWidget(self.preview)
+        after_layout.addWidget(self.preview)
+        previews.addWidget(after_panel)
+        layout.addLayout(previews)
         buttons = QHBoxLayout()
         self.start_button = QPushButton("Start")
         self.start_button.setObjectName("start")
@@ -193,8 +215,12 @@ class ControlWindow(QWidget):
         layout.addLayout(buttons)
         self.status = QLabel("Ready")
         self.audio_status = QLabel("Audio: off")
+        self.display_status = QLabel('Display: off')
+        self.comparison_status = QLabel('Comparison: off')
+        self.comparison_status.hide()
         self.device_status = QLabel("")
-        for label in (self.status, self.audio_status, self.device_status):
+        for label in (self.status, self.audio_status, self.display_status,
+                      self.comparison_status, self.device_status):
             label.setWordWrap(True)
             layout.addWidget(label)
         self.device_status.hide()
@@ -213,6 +239,7 @@ class ControlWindow(QWidget):
         self.devices_button.clicked.connect(self.show_devices)
         self.monitors.currentIndexChanged.connect(self.change_source)
         self.share_mode.currentIndexChanged.connect(self.change_mode)
+        self.compare_toggle.toggled.connect(self.change_comparison)
         self.controller.changed.connect(self.sync_state)
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -239,13 +266,35 @@ class ControlWindow(QWidget):
     def _running(self): return self.controller.running
 
     def sync_state(self):
-        self.status.setText(self.controller.video_status)
+        self.status.setText(f'Video: {self.controller.video_status}')
         self.update_instruction()
         self.audio_status.setText(self.controller.audio_status)
+        self.display_status.setText(self.controller.display_status)
         self.start_button.setEnabled(not self._running and self.monitors.count() > 0)
         self.stop_button.setEnabled(self._running or self.worker is not None or self.controller.lease is not None)
         if not self._running:
             self.timer.stop()
+            self.clear_previews()
+
+    def clear_previews(self):
+        for preview in (self.preview, self.before_preview):
+            preview.image = QImage()
+            preview.update()
+        self.comparison_status.setText('Comparison: off')
+        self.stats.setText('Up to 4K · 60 FPS target')
+
+    def change_comparison(self, enabled):
+        self.before_panel.setVisible(enabled)
+        self.after_label.setVisible(enabled)
+        self.comparison_status.setVisible(enabled)
+        self.preview.setFixedSize(236, 133) if enabled else self.preview.setFixedSize(480, 270)
+        self._preview_sequence = self._before_sequence = 0
+        self.before_preview.image = QImage()
+        self.before_preview.update()
+        self.comparison_status.setText('Comparison: waiting for Start' if enabled else 'Comparison: off')
+        if self.worker is not None:
+            self.worker.set_comparison_enabled(enabled and self._preview_allowed and not self.isMinimized())
+        self.adjustSize()
 
     def refresh_sources(self):
         if not self.stop_capture():
@@ -297,11 +346,14 @@ class ControlWindow(QWidget):
         if source_id is None:
             return
         self._preview_sequence = 0
+        self._before_sequence = 0
         self._last_counts = (0, self.output.presented)
         self._last_stats_at = time.monotonic()
         self._verify_at = time.monotonic() + 1
         self.controller.start(source_id, mode=self.share_mode.currentData())
         if self._running:
+            self.worker.set_comparison_enabled(self.compare_toggle.isChecked() and self._preview_allowed
+                                               and not self.isMinimized())
             self.timer.start()
         self.sync_state()
 
@@ -318,12 +370,24 @@ class ControlWindow(QWidget):
         self.sync_state()
 
     def present_preview(self):
+        compare = self.compare_toggle.isChecked()
+        if self.worker is not None:
+            self.worker.set_comparison_enabled(compare and self._preview_allowed and not self.isMinimized())
         if not self._running or self.isMinimized() or not self._preview_allowed:
             return
         item = self.frames.latest_after(self._preview_sequence)
         if item is not None:
             self._preview_sequence, pixels, _ = item
             self.preview.set_frame(pixels)
+        if compare and self.worker is not None:
+            self.comparison_status.setText(f'Comparison: {self.worker.comparison_status}')
+            item = self.worker.comparison_frames.latest_after(self._before_sequence)
+            if item is not None:
+                self._before_sequence, pixels, _ = item
+                self.before_preview.set_frame(pixels)
+            elif self.worker.comparison_status != 'Live':
+                self.before_preview.image = QImage()
+                self.before_preview.update()
 
     def present_latest(self):
         self.controller.present_latest()
@@ -353,6 +417,7 @@ class ControlWindow(QWidget):
             self._preview_allowed = self._affinity(int(self.winId()))
             if not self._preview_allowed:
                 self.device_status.setText("Preview unavailable")
+                self.device_status.show()
 
     def closeEvent(self, event):
         if self.stop_capture():

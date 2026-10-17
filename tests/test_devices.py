@@ -56,3 +56,11 @@ def test_device_check_does_not_report_ready_without_audio_output():
     result = check_devices(display_backend=Display(), audio_bridge=Audio())
     assert not result.ready
     assert any('VB-CABLE' in issue for issue in result.issues)
+
+
+def test_installed_disabled_adapter_does_not_require_reinstall():
+    from hdr_share.devices import check_devices
+    class Display:
+        def registered(self): return True
+        def owned_display(self): return None
+    assert check_devices(display_backend=Display(), require_audio=False).ready

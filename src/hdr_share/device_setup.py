@@ -125,7 +125,7 @@ class DeviceSetupDialog(QDialog):
     def check(self):
         result = check_devices(require_audio=self.mode == 'application')
         self.status.setText('Devices ready' if result.ready else '\n'.join(result.issues))
-        self.display_button.setEnabled(WindowsDisplayBackend().owned_display() is None)
+        self.display_button.setEnabled(not WindowsDisplayBackend.registered())
 
     def start_download(self):
         self.display_button.setEnabled(False)

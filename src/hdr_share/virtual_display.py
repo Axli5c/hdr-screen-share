@@ -38,6 +38,8 @@ class DisplayLease:
         self.backend.claim()
         self._claimed = True
         try:
+            if hasattr(self.backend, 'prepare'):
+                self.backend.prepare()
             identity = self.backend.owned_display()
             if identity is None:
                 raise DisplayLeaseError('No app-owned virtual display is registered')
@@ -65,6 +67,9 @@ class DisplayLease:
 
     def release(self) -> None:
         if self._identity is None:
+            if self._claimed:
+                self.backend.unclaim()
+                self._claimed = False
             return
         identity, before, applied = self._identity, self._before, self._applied
         owned = self.backend.owned_display()
@@ -74,14 +79,29 @@ class DisplayLease:
             self.backend.restore(identity, before)
         # A vanished device/user edit is preserved. Exceptions above retain all
         # state so stop/close can retry without another instance stealing it.
-        self._identity = self._before = self._applied = self._source = None
         if self._claimed:
             self.backend.unclaim()
             self._claimed = False
+        self._identity = self._before = self._applied = self._source = None
 
 
 OWN_INSTANCE = r'ROOT\HDRSCREENSHAREVDD\0000'
 PACKAGE_HASH = 'F93E7CE3D640C83C419B1B72D2C83B2D8E34D83E8B7BA11F3328A40D2DA82FA4'
+
+
+def owned_device_registered():
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\HDRScreenShare') as key:
+            identity = winreg.QueryValueEx(key, 'DeviceInstance')[0]
+            digest = winreg.QueryValueEx(key, 'PackageHash')[0]
+        if identity.upper() != OWN_INSTANCE or digest.upper() != PACKAGE_HASH:
+            return False
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            'SYSTEM\\CurrentControlSet\\Enum\\' + OWN_INSTANCE) as key:
+            hardware = winreg.QueryValueEx(key, 'HardwareID')[0]
+        return any(item.casefold() == r'root\mttvdd' for item in hardware)
+    except OSError:
+        return False
 
 
 def is_owned_adapter_path(path: str) -> bool:
@@ -129,9 +149,14 @@ class WindowsDisplayBackend:
     always_detach = True  # The app-owned output must never remain as an idle desktop.
     _claim_guard = threading.Lock()
     _claimed_in_process = False
+
+    @staticmethod
+    def registered():
+        return owned_device_registered()
     def __init__(self):
         self._mutex = None
         self._guard = None
+        self._device_guard = None
         self.kernel32 = C.WinDLL('kernel32', use_last_error=True)
         self.kernel32.CreateMutexW.argtypes = [W.LPVOID, W.BOOL, W.LPCWSTR]
         self.kernel32.CreateMutexW.restype = W.HANDLE
@@ -167,6 +192,11 @@ class WindowsDisplayBackend:
                 self.kernel32.CloseHandle(self._mutex)
                 self._mutex = None
                 WindowsDisplayBackend._claimed_in_process = False
+        # The helper acquires this lock before removal, including normal Stop.
+        # A newer session that wins the lock must never be disconnected by it.
+        if self._device_guard is not None:
+            self._device_guard.cancel()
+            self._device_guard = None
         if self._guard is not None:
             guard, self._guard = self._guard, None
             try:
@@ -175,8 +205,24 @@ class WindowsDisplayBackend:
                 pass
 
     def watch(self, identity, expected):
+        if self._device_guard is not None:
+            return  # Elevated helper already watches this process and removes the device.
         from .display_guard import DisplayGuard
         self._guard = DisplayGuard(identity, expected)
+
+    def prepare(self):
+        import time
+        from .display_guard import ElevatedDisplayGuard
+        if not owned_device_registered():
+            raise DisplayLeaseError('No app-owned virtual display is registered')
+        # Retain ownership even if launch/cleanup times out, so Stop can retry.
+        self._device_guard = ElevatedDisplayGuard(launch=False)
+        self._device_guard.start()
+        deadline = time.monotonic() + 8
+        while self.owned_display() is None and time.monotonic() < deadline:
+            time.sleep(.1)
+        if self.owned_display() is None:
+            raise DisplayLeaseError('Virtual display did not connect')
 
     @staticmethod
     def release_state(before):
@@ -192,18 +238,7 @@ class WindowsDisplayBackend:
             index += 1
 
     def owned_display(self) -> str | None:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\HDRScreenShare') as key:
-                identity = winreg.QueryValueEx(key, 'DeviceInstance')[0]
-                digest = winreg.QueryValueEx(key, 'PackageHash')[0]
-            if identity.upper() != OWN_INSTANCE or digest.upper() != PACKAGE_HASH:
-                return None
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                'SYSTEM\\CurrentControlSet\\Enum\\' + OWN_INSTANCE) as key:
-                hardware = winreg.QueryValueEx(key, 'HardwareID')[0]
-            if not any(item.casefold() == r'root\mttvdd' for item in hardware):
-                return None
-        except OSError:
+        if not owned_device_registered():
             return None
         # EnumDisplayDevices reports only hardware ID (Root\MttVDD). Resolve the
         # complete PnP instance through DisplayConfig adapter interfaces instead.

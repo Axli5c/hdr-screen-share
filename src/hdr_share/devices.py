@@ -49,7 +49,8 @@ def check_devices(*, display_backend=None, audio_bridge=None, require_audio=True
     from .audio import NativeAudioBridge, AudioError
     backend = display_backend if display_backend is not None else WindowsDisplayBackend()
     issues = []
-    if backend.owned_display() is None:
+    installed = backend.registered() if hasattr(backend, 'registered') else backend.owned_display() is not None
+    if not installed:
         issues.append('Virtual display is not installed')
     if not require_audio:
         return DeviceCheck(not issues, issues)

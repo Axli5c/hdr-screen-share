@@ -68,3 +68,69 @@ def test_disconnected_source_does_not_start_wrong_monitor():
     worker.start()
     assert worker.wait(2500)
     assert "display" in worker.last_error.lower()
+
+
+def test_unmapped_preview_clips_hdr_highlights_without_tone_mapping():
+    from hdr_share.capture import unmapped_preview
+    raw = np.array([[[2, .5, -.1, 1], [np.nan, np.inf, 0, 1]]], dtype=np.float16)
+    pixels = unmapped_preview(raw)
+    assert pixels.dtype == np.uint8
+    assert tuple(pixels[0, 0]) == (0, 188, 255, 255)
+    assert tuple(pixels[0, 1]) == (0, 255, 0, 255)
+
+
+def test_comparison_is_optional_and_closes_raw_session_while_stream_continues():
+    from hdr_share.frames import FrameMailbox
+    modes, closed = [], []
+    class Session:
+        is_hdr = True
+        def __init__(self, mode): self.mode = mode
+        def grab(self):
+            mode = self.mode
+            return type('Frame', (), {'timestamp': time.monotonic(),
+                'format': 'rgba16f' if mode == 'hdr' else 'bgra8',
+                'ndarray': lambda _: np.ones((4, 8, 4), np.float16 if mode == 'hdr' else np.uint8)})()
+        def close(self): closed.append(self.mode)
+    def factory(index, mode):
+        modes.append(mode)
+        return Session(mode)
+    worker = CaptureWorker(SOURCE.id, FrameMailbox(), sources=lambda: [SOURCE], factory=factory)
+    def wait_for(condition):
+        deadline = time.monotonic() + 2
+        while not condition() and time.monotonic() < deadline: time.sleep(.005)
+        assert condition()
+    worker.start()
+    try:
+        wait_for(lambda: worker.captured > 1)
+        assert modes == ['auto']
+        worker.set_comparison_enabled(True)
+        wait_for(lambda: worker.comparison_frames.latest_after(0) is not None)
+        assert modes == ['auto', 'hdr']
+        assert worker.comparison_frames.latest_after(0)[1].shape == (4, 8, 4)
+        worker.set_comparison_enabled(False)
+        count = worker.captured
+        wait_for(lambda: 'hdr' in closed and worker.captured > count)
+        assert worker.comparison_frames.latest_after(0) is None
+    finally:
+        worker.request_stop()
+        assert worker.wait(2500)
+    assert closed == ['hdr', 'auto']
+
+
+def test_comparison_failure_does_not_stop_processed_video():
+    from hdr_share.frames import FrameMailbox
+    def factory(index, mode):
+        if mode == 'hdr': raise RuntimeError('raw capture unavailable')
+        return FakeSession()
+    worker = CaptureWorker(SOURCE.id, FrameMailbox(), sources=lambda: [SOURCE], factory=factory)
+    worker.set_comparison_enabled(True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 2
+        while 'unavailable' not in worker.comparison_status and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert 'raw capture unavailable' in worker.comparison_status
+        assert worker.isRunning() and worker.captured > 0 and not worker.last_error
+    finally:
+        worker.request_stop()
+        assert worker.wait(2500)

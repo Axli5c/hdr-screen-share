@@ -127,7 +127,9 @@ public static class HssDeviceSetup {
     [HssDeviceSetup]::Register()
     & "$env:SystemRoot\System32\pnputil.exe" /add-driver (Join-Path $destination 'MttVDD.inf') /install
     if ($LASTEXITCODE -notin @(0,3010)) { throw "pnputil failed: $LASTEXITCODE. Preserve device for diagnosis." }
-    Write-Output 'Dedicated signed VDD installed. No automatic reboot. Verify/detach it using the application device probe.'
+    & "$env:SystemRoot\System32\pnputil.exe" /disable-device 'ROOT\HDRSCREENSHAREVDD\0000'
+    if ($LASTEXITCODE -ne 0) { throw "Cannot disable idle adapter: $LASTEXITCODE" }
+    Write-Output 'Dedicated signed VDD installed and disabled until Start. No automatic reboot.'
 } catch {
     $_ | Out-String | Write-Output
     throw

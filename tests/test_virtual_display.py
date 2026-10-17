@@ -162,3 +162,17 @@ def test_failure_after_attach_rolls_back_before_unlocking():
         lease.acquire()
     assert api.current == 'detached'
     assert not api.claimed
+
+
+def test_failed_elevated_cleanup_retains_lease_for_retry():
+    api = Desktop()
+    lease = DisplayLease('physical', 3840, 2160, backend=api)
+    lease.acquire()
+    original = api.unclaim
+    api.unclaim = lambda: (_ for _ in ()).throw(RuntimeError('device cleanup pending'))
+    with pytest.raises(RuntimeError, match='cleanup pending'):
+        lease.release()
+    assert api.claimed
+    api.unclaim = original
+    lease.release()
+    assert not api.claimed

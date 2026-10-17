@@ -39,6 +39,7 @@ class StreamController(QObject):
         self.running = self.starting = False
         self.video_status = 'Ready'
         self.audio_status = 'Audio: off'
+        self.display_status = 'Display: off'
         self._source_id = self._target_id = None
         self._topology = ()
         self._sequence = 0
@@ -58,6 +59,10 @@ class StreamController(QObject):
         if not self.stop():
             return
         self.starting = True
+        self.video_status = 'Starting…'
+        self.audio_status = 'Audio: starting…' if mode == 'application' else 'Audio: Discord system audio'
+        self.display_status = 'Display: connecting…'
+        self.changed.emit()
         self.frames = FrameMailbox()
         self._sequence = 0
         self._source_id = source_id
@@ -69,6 +74,7 @@ class StreamController(QObject):
             target = self.lease.acquire()
             self._target_id = target.id
             self.target_number = target.index + 1
+            self.display_status = f'Display: Screen {self.target_number} · connected'
             # Flush the screen-added notification while startup ignores topology events.
             QApplication.processEvents()
             screen = self.screen_lookup(target.id)
@@ -145,11 +151,13 @@ class StreamController(QObject):
                 self.lease = None
             except Exception as error:
                 self.video_status = f'Display cleanup failed: {error}'
+                self.display_status = f'Display: cleanup failed · {error}'
                 self.changed.emit()
                 return False
         self.frames.clear()
         self.video_status = 'Ready'
         self.audio_status = 'Audio: off'
+        self.display_status = 'Display: off'
         self.changed.emit()
         return True
 

@@ -15,7 +15,7 @@ def main():
     before = list_sources()
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
-    window = ControlWindow()
+    window = ControlWindow(autostart=True)
     window.show()
     result = {}
     counts = {}

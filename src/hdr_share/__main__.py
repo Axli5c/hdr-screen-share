@@ -12,8 +12,23 @@ def main():
     parser.add_argument("--smoke-seconds", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--diagnostics", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--display-guard", help=argparse.SUPPRESS)
+    parser.add_argument("--device-guard", help=argparse.SUPPRESS)
+    parser.add_argument('--compare-preview', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument("--mode", choices=['screen', 'application'], default='screen')
     args = parser.parse_args()
+    if args.device_guard:
+        from .display_guard import run_device_guard
+        import os
+        logdir = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'HDRScreenShare'
+        logdir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=logdir / 'device-guard.log', level=logging.INFO)
+        try:
+            result = run_device_guard(args.device_guard)
+            logging.info('Device guard exit: %s', result)
+            return result
+        except Exception:
+            logging.exception('Device guard failed')
+            return 1
     if args.display_guard:
         from .display_guard import run_guard
         return run_guard(args.display_guard)
@@ -30,7 +45,8 @@ def main():
     app = QApplication(sys.argv[:1])
     app.setApplicationName("HDR Screen Share")
     app.setQuitOnLastWindowClosed(False)
-    window = ControlWindow(default_mode=args.mode)
+    window = ControlWindow(default_mode=args.mode, autostart=bool(args.smoke_seconds))
+    window.compare_toggle.setChecked(args.compare_preview)
     window.show()
     # Explicit quit follows successful worker shutdown, never the invisible output window.
     window.closed.connect(app.quit)
@@ -46,6 +62,10 @@ def main():
                     "status": window.status.text(), "error": worker.last_error if worker else "",
                     "stats": window.stats.text()}
             data['audio_status'] = window.audio_status.text()
+            data['display_status'] = window.display_status.text()
+            data['comparison_status'] = window.comparison_status.text()
+            data['before_preview_frames'] = window.before_preview.received
+            data['after_preview_frames'] = window.preview.received
             data['audio_stats'] = window.controller.audio.stats() if window.controller.audio else None
             if worker and worker.started_at:
                 elapsed = time.monotonic() - worker.started_at
