@@ -19,7 +19,7 @@ class CaptureSource:
 
 def default_source(sources: list[CaptureSource]) -> CaptureSource:
     if not sources:
-        raise RuntimeError("Windows не обнаружила подключённых мониторов")
+        raise RuntimeError("No connected displays")
     return min(sources, key=lambda s: (
         not (s.primary and s.hdr_enabled is True),
         s.hdr_enabled is not True, not s.primary,
@@ -143,7 +143,7 @@ def list_sources() -> list[CaptureSource]:
     user32.EnumDisplayMonitors.argtypes = [W.HDC, C.POINTER(W.RECT), callback_type, W.LPARAM]
     user32.EnumDisplayMonitors.restype = W.BOOL
     if not user32.EnumDisplayMonitors(None, None, visit, 0) or callback_error:
-        raise RuntimeError("Не удалось получить список мониторов Windows")
+        raise RuntimeError("Cannot enumerate displays")
     return sources
 
 

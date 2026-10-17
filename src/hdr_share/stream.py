@@ -16,9 +16,9 @@ def open_audio():
     candidates = [item for item in bridge.endpoints()
                   if 'CABLE Input' in item['name'] and 'VB-Audio' in item['name']]
     if len(candidates) != 1:
-        raise RuntimeError('Не найден активный CABLE Input. Проверьте установку VB-CABLE.')
+        raise RuntimeError('VB-CABLE is not installed.')
     if candidates[0]['default_roles']:
-        raise RuntimeError('Выберите наушники устройством Windows по умолчанию вместо VB-CABLE.')
+        raise RuntimeError('Set your headphones as the default Windows output.')
     return AudioRelay(candidates[0]['id'], bridge=bridge)
 
 
@@ -37,8 +37,8 @@ class StreamController(QObject):
         self.frames = FrameMailbox()
         self.worker = self.lease = self.audio = None
         self.running = self.starting = False
-        self.video_status = 'Видео остановлено'
-        self.audio_status = 'Звук остановлен'
+        self.video_status = 'Ready'
+        self.audio_status = 'Audio: off'
         self._source_id = self._target_id = None
         self._topology = ()
         self._sequence = 0
@@ -47,11 +47,14 @@ class StreamController(QObject):
     def topology(sources, source_id, target_id):
         selected = [source for source in sources if source.id in (source_id, target_id)]
         if source_id == target_id or len(selected) != 2:
-            raise RuntimeError('Выбранный монитор или виртуальный дисплей недоступен')
+            raise RuntimeError('Display unavailable')
         return tuple((s.id, s.index, s.left, s.top, s.width, s.height, s.hdr_enabled)
                      for s in sorted(selected, key=lambda s: s.id))
 
-    def start(self, source_id):
+    def start(self, source_id, mode="application"):
+        if mode not in ("screen", "application"):
+            raise ValueError("Unknown share mode")
+        self.mode = mode
         if not self.stop():
             return
         self.starting = True
@@ -61,15 +64,16 @@ class StreamController(QObject):
         try:
             source = next((s for s in self.sources() if s.id == source_id), None)
             if source is None:
-                raise RuntimeError('Выбранный монитор отключён')
+                raise RuntimeError('Source disconnected')
             self.lease = self.lease_factory(source_id, *fit_size(source.width, source.height))
             target = self.lease.acquire()
             self._target_id = target.id
+            self.target_number = target.index + 1
             # Flush the screen-added notification while startup ignores topology events.
             QApplication.processEvents()
             screen = self.screen_lookup(target.id)
             if screen is None:
-                raise RuntimeError('Виртуальный монитор пока недоступен для вывода')
+                raise RuntimeError('Virtual display unavailable')
             self._topology = self.topology(self.sources(), source_id, target.id)
             self.output.place_on(screen)
             ratio = screen.devicePixelRatio()
@@ -82,34 +86,35 @@ class StreamController(QObject):
             worker.failed.connect(lambda message: self._error(worker, message))
             worker.finished.connect(lambda: self._finished(worker))
             self.running = True
-            self.video_status = 'Запуск видео…'
+            self.video_status = 'Starting…'
             worker.start()
-            try:
-                self.audio = self.audio_factory()
-                self.audio.start()
-                self.audio_status = 'Звук приложений · без Discord и микрофона'
-                if getattr(self.audio, 'warning', ''):
-                    self.audio_status += '\n' + self.audio.warning
-            except Exception as error:
-                if self.audio is not None:
-                    self.audio.stop()
-                    self.audio = None
-                self.audio_status = f'Звук отключён: {error}'
+            if mode == "application":
+                try:
+                    self.audio = self.audio_factory()
+                    self.audio.start()
+                    self.audio_status = 'Audio: filtered app mix'
+                except Exception as error:
+                    if self.audio is not None:
+                        self.audio.stop()
+                        self.audio = None
+                    self.audio_status = f'Audio unavailable: {error}'
+            else:
+                self.audio_status = "Audio: Discord system audio"
         except Exception as error:
             self.stop()
-            self.video_status = f'Ошибка: {error}'
+            self.video_status = f'Error: {error}'
         finally:
             self.starting = False
             self.changed.emit()
 
     def _ready(self, worker, hdr):
         if worker is self.worker and self.running:
-            self.video_status = 'HDR → SDR · видео работает' if hdr else 'SDR · видео работает'
+            self.video_status = 'HDR → SDR · Running' if hdr else 'SDR · Running'
             self.changed.emit()
 
     def _error(self, worker, message):
         if worker is self.worker:
-            self.video_status = f'Ошибка захвата: {message}'
+            self.video_status = f'Capture error: {message}'
             self.output.hide()
             self.changed.emit()
 
@@ -129,7 +134,7 @@ class StreamController(QObject):
         if self.worker is not None:
             self.worker.request_stop()
             if not self.worker.wait(3000):
-                self.video_status = 'Ожидание остановки захвата…'
+                self.video_status = 'Stopping…'
                 self.changed.emit()
                 return False
             worker, self.worker = self.worker, None
@@ -139,12 +144,12 @@ class StreamController(QObject):
                 self.lease.release()
                 self.lease = None
             except Exception as error:
-                self.video_status = f'Не удалось освободить виртуальный дисплей: {error}'
+                self.video_status = f'Display cleanup failed: {error}'
                 self.changed.emit()
                 return False
         self.frames.clear()
-        self.video_status = 'Видео остановлено'
-        self.audio_status = 'Звук остановлен'
+        self.video_status = 'Ready'
+        self.audio_status = 'Audio: off'
         self.changed.emit()
         return True
 
@@ -152,7 +157,7 @@ class StreamController(QObject):
         if self.running and not self.starting:
             self.output.hide()
             self.stop()
-            self.video_status = 'Конфигурация мониторов изменилась. Обновите список и запустите снова.'
+            self.video_status = 'Displays changed. Refresh to restart.'
             self.changed.emit()
 
     def verify_displays(self):
@@ -164,12 +169,11 @@ class StreamController(QObject):
         except Exception:
             self.display_changed()
         if self.audio is not None and self.audio.last_error:
-            self.audio_status = f'Звук отключён: {self.audio.last_error}'
+            self.audio_status = f'Audio unavailable: {self.audio.last_error}'
             self.changed.emit()
         elif self.audio is not None:
-            self.audio_status = 'Звук приложений · без Discord и микрофона'
-            if getattr(self.audio, 'warning', ''):
-                self.audio_status += '\n' + self.audio.warning
+            self.audio_status = 'Audio: filtered app mix'
+
             self.changed.emit()
 
     def present_latest(self):

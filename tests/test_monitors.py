@@ -26,5 +26,5 @@ def test_no_hdr_falls_back_to_primary_and_unknown_stays_unknown():
 
 
 def test_missing_displays_is_actionable_error():
-    with pytest.raises(RuntimeError, match="монитор"):
+    with pytest.raises(RuntimeError, match="display"):
         default_source([])

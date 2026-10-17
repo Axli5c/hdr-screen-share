@@ -44,21 +44,23 @@ def verify_signature(status: str, subject: str, publishers: set[str]) -> None:
         raise PackageError('Untrusted driver signature')
 
 
-def check_devices(*, display_backend=None, audio_bridge=None) -> DeviceCheck:
+def check_devices(*, display_backend=None, audio_bridge=None, require_audio=True) -> DeviceCheck:
     from .virtual_display import WindowsDisplayBackend
     from .audio import NativeAudioBridge, AudioError
     backend = display_backend if display_backend is not None else WindowsDisplayBackend()
     issues = []
     if backend.owned_display() is None:
-        issues.append('Не установлен собственный виртуальный дисплей HDR Screen Share')
+        issues.append('Virtual display is not installed')
+    if not require_audio:
+        return DeviceCheck(not issues, issues)
     try:
         bridge = audio_bridge if audio_bridge is not None else NativeAudioBridge()
         cable = [item for item in bridge.endpoints()
                  if 'CABLE Input' in item['name'] and 'VB-Audio' in item['name']]
         if len(cable) != 1:
-            issues.append('Не найден единственный активный выход VB-CABLE (CABLE Input)')
+            issues.append('VB-CABLE is not installed')
         elif cable[0]['default_roles']:
-            issues.append('VB-CABLE назначен устройством по умолчанию; выберите свои наушники в Windows')
+            issues.append('Set your headphones as the default Windows output')
     except AudioError as error:
         issues.append(str(error))
     return DeviceCheck(not issues, issues)

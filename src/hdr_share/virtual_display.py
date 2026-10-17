@@ -44,10 +44,14 @@ class DisplayLease:
             if identity == self.source_id:
                 raise DisplayLeaseError('Output cannot be captured as input')
             before = self.backend.snapshot(identity)
+            if hasattr(self.backend, 'release_state'):
+                before = self.backend.release_state(before)
             applied = self.backend.attachment_state(identity, self.width, self.height)
             # Save the cleanup token before the first operation that can attach.
             self._identity, self._before = identity, before
             self._applied = applied
+            if hasattr(self.backend, 'watch'):
+                self.backend.watch(identity, applied)
             source = self.backend.attach(identity, self.width, self.height, state=applied)
             self._source = source
             return source
@@ -63,7 +67,10 @@ class DisplayLease:
         if self._identity is None:
             return
         identity, before, applied = self._identity, self._before, self._applied
-        if self.backend.owned_display() == identity and self.backend.snapshot(identity) == applied:
+        owned = self.backend.owned_display()
+        if getattr(self.backend, 'always_detach', False) and owned is not None:
+            self.backend.restore(owned, before)
+        elif owned == identity and self.backend.snapshot(identity) == applied:
             self.backend.restore(identity, before)
         # A vanished device/user edit is preserved. Exceptions above retain all
         # state so stop/close can retry without another instance stealing it.
@@ -119,10 +126,12 @@ class DisplayState:
 
 
 class WindowsDisplayBackend:
+    always_detach = True  # The app-owned output must never remain as an idle desktop.
     _claim_guard = threading.Lock()
     _claimed_in_process = False
     def __init__(self):
         self._mutex = None
+        self._guard = None
         self.kernel32 = C.WinDLL('kernel32', use_last_error=True)
         self.kernel32.CreateMutexW.argtypes = [W.LPVOID, W.BOOL, W.LPCWSTR]
         self.kernel32.CreateMutexW.restype = W.HANDLE
@@ -158,6 +167,20 @@ class WindowsDisplayBackend:
                 self.kernel32.CloseHandle(self._mutex)
                 self._mutex = None
                 WindowsDisplayBackend._claimed_in_process = False
+        if self._guard is not None:
+            guard, self._guard = self._guard, None
+            try:
+                guard.cancel()
+            except (OSError, TimeoutError):
+                pass
+
+    def watch(self, identity, expected):
+        from .display_guard import DisplayGuard
+        self._guard = DisplayGuard(identity, expected)
+
+    @staticmethod
+    def release_state(before):
+        return DisplayState(False, 0, 0, 0, 0, 60, 32, 0)
 
     def _devices(self):
         index = 0

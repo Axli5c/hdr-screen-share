@@ -40,11 +40,11 @@ class CaptureWorker(QThread):
         try:
             source = next((s for s in self._sources() if s.id == self.source_id), None)
             if source is None:
-                raise RuntimeError("Выбранный монитор отключён. Обновите список мониторов.")
+                raise RuntimeError("Source disconnected. Refresh displays.")
             session = self._factory(source.index, mode="auto")
             actual_hdr = session.is_hdr
             if source.hdr_enabled is not None and source.hdr_enabled != actual_hdr:
-                raise RuntimeError("Режим HDR монитора изменился. Обновите список и запустите снова.")
+                raise RuntimeError("HDR mode changed. Restart capture.")
             self.ready.emit(actual_hdr)
             self.started_at = time.monotonic()
             deadline = self.started_at
@@ -55,7 +55,7 @@ class CaptureWorker(QThread):
                 now = time.monotonic()
                 if frame.timestamp != last_timestamp:
                     if frame.format != "bgra8":
-                        raise RuntimeError("HDR backend не вернул преобразованный SDR-кадр BGRA8")
+                        raise RuntimeError("HDR conversion failed")
                     self.frames.put(frame.ndarray())
                     self.frame_size = (frame.width, frame.height) if hasattr(frame, "width") else (0, 0)
                     self.captured += 1
@@ -66,9 +66,9 @@ class CaptureWorker(QThread):
                 if now >= topology_at:
                     current = next((s for s in self._sources() if s.id == self.source_id), None)
                     if current is None:
-                        raise RuntimeError("Выбранный монитор отключён. Обновите список.")
+                        raise RuntimeError("Source disconnected. Refresh displays.")
                     if current.index != source.index or current.hdr_enabled != source.hdr_enabled:
-                        raise RuntimeError("Конфигурация мониторов изменилась. Запустите захват снова.")
+                        raise RuntimeError("Displays changed. Restart capture.")
                     topology_at = now + 1
                 deadline += 1 / 60
                 if deadline < time.monotonic():

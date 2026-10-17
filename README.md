@@ -1,45 +1,34 @@
-# HDR Screen Share 0.2
+# HDR Screen Share 0.2.1
 
-Приложение для Windows x64: преобразует выбранный HDR-монитор в SDR для захвата отдельного окна в Discord. На физических экранах остаётся только небольшое окно управления с миниатюрой. Локальный HDR не выключается.
+Convert an HDR monitor to SDR for Discord while keeping local HDR enabled.
 
-## Запуск
+## Use
 
-1. Запустите `dist/HDRScreenShare/HDRScreenShare.exe`. Папка `_internal` должна оставаться рядом; отдельный Python не нужен.
-2. Выберите монитор. Основной HDR-монитор выбирается автоматически; захват запускается при открытии приложения.
-3. В **настольном Discord** выберите трансляцию **окна приложения «HDR Screen Share — Discord»** и включите звук приложения. Если источник скрыт, включите показ всех приложений.
-4. Окно управления можно свернуть: полноразмерный вывод продолжит работать на собственном виртуальном экране. Остановка и закрытие освобождают этот экран.
+1. Run `dist/HDRScreenShare/HDRScreenShare.exe`. Keep `_internal` beside it.
+2. Choose your monitor and sharing mode.
+3. Select the source shown by the app in Discord and enable its audio toggle.
 
-Не выбирайте исходный HDR-экран или весь экран с общим системным звуком: такой путь обходит преобразование или фильтрацию. Два физических монитора больше не нужны. Отдельное полноразмерное окно не размещается на физических экранах.
+**Virtual screen** (default): share the processed SDR screen with Discord system audio. VB-CABLE is not needed for this mode.
 
-## Устройства: один раз
+**Application window**: share **HDR Screen Share** with application audio. This mode uses the existing VB-CABLE relay to mix application/game audio while excluding desktop Discord and this app. Physical microphone devices are not opened.
 
-На компьютере разработки подписанный VDD и VB-CABLE уже установлены. На другом компьютере нажмите **«Установка и проверка устройств»**:
+The control window shows a small preview and can be minimized. Full-size output stays on the app-owned virtual display. Stop/close detaches that display. A lightweight watchdog also detaches it after the main app process crashes. Physical screens are not duplicated or reconfigured.
 
-- **Виртуальный экран:** кнопка скачивает закреплённый официальный VDD 24.12.24, проверяет SHA-256 и запускает отдельный установочный помощник с Windows UAC. Он повторно проверяет подписи, создаёт только `ROOT\HDRSCREENSHAREVDD\0000` и отказывается присваивать существующий чужой VDD. При несовместимой существующей установке нужна ручная диагностика.
-- **VB-CABLE:** откройте официальный сайт из диалога и установите оригинальный пакет отдельно. Его установщик не включён в программу. Если производитель требует перезагрузку, выполните её самостоятельно.
-- Оставьте **наушники/колонки** устройством Windows по умолчанию. Не назначайте кабель микрофоном Discord и не включайте прослушивание кабеля в наушниках.
+## One-time setup
 
-Программа работает с обычными правами. Повышение требуется только отдельному установщику дисплея. Test signing, Secure Boot и доверенные корневые сертификаты не меняются. Автоматической перезагрузки нет.
+Open **Devices**. Install the signed virtual display driver. Application-window audio additionally needs the original [VB-CABLE installer](https://vb-audio.com/Cable/), linked only in that mode. Keep your headphones as Windows' default output. Normal use does not need administrator rights. Driver setup uses Windows UAC and does not reboot automatically.
 
-## Звук
+## Details
 
-Захватывается звук активных приложений и игр. Он смешивается в процессе программы и выводится только в playback-устройство **CABLE Input (VB-Audio Virtual Cable)**. Обычный звук приложений продолжает идти в ваши наушники; релей не воспроизводит дополнительную копию в них.
+Video supports up to3840×2160 (portrait2160×3840), without upscaling. Preview is480×270 at up to15FPS. Frame counters measure local capture/painting, not Discord viewer FPS.
 
-Настольный Discord/PTB/Canary, их дочерние процессы и само приложение исключаются. Физические микрофоны не открываются; обычный микрофон голосового чата Discord остаётся вашим микрофоном. При потере кабеля или невозможности определить безопасный набор процессов звук отключается с сообщением; видео продолжает работать.
+Discord controls system audio and screen captions in Virtual screen mode. The application's Discord exclusion filter applies only to Application window mode. System/unsupported audio sessions are excluded from the application relay. Browser Discord tabs cannot be isolated from other browser audio; use desktop Discord for filtered sharing.
 
-Ограничения: системные сессии Windows Audio, системные уведомления и защищённые/недоступные потоки не передаются. Это отображается в статусе звука. Вкладку Discord внутри браузера невозможно отделить от остальных звуков того же браузера — используйте настольный Discord. Доставка отфильтрованного звука зрителю через захват окна Discord **ещё не проверена вторым клиентом**.
+FullHDR4K60, A/V drift and viewer delivery remain unverified. Local screen/audio and crash-cleanup measurements are in `docs/verification-v2.md` and `docs/verification-v021.md`. Ordinary use does not save frames or audio. App log: `%LOCALAPPDATA%/HDRScreenShare/app.log`.
 
-## Разрешение и производительность
+## Build
 
-Поддерживаемый размер — до 3840×2160, для портретной ориентации до 2160×3840, с сохранением пропорций и без увеличения исходника. Миниатюра ограничена 480×270 и обновляется не чаще 15 FPS; её размер не ограничивает трансляционное окно. Для игр предпочтителен безрамочный режим.
-
-Цель — 60 FPS; интерфейс показывает новые захваченные кадры и отрисовки окна. Статичный экран даёт меньшую частоту новых кадров. Эти счётчики не измеряют частоту кадров у зрителя. Разрешение/FPS, доступные в Discord, выбираются отдельно в Discord.
-
-Реальные HDR→SDR и звук приложений проверены при 2560×1440. Полный 4K-размер окна и WGC-захват проверены отдельно. Устойчивая полноценная цепочка 4K/60, синхронизация A/V и второй Discord-клиент остаются незакрытыми проверками. Это диагностический прототип, а не подтверждённый выпуск 4K/60. Измерения: `docs/verification-v2.md`.
-
-## Исходники и сборка
-
-Нужны CPython 3.12 x64 и MSVC x64 Build Tools с Windows SDK для нативной DLL. Готовый exe этих инструментов не требует.
+CPython3.12x64, MSVC x64 Build Tools and Windows SDK are required for development only.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -47,17 +36,9 @@ py -3.12 -m venv .venv
 ./build.ps1
 ```
 
-`build.ps1` собирает нативную DLL/тесты, выполняет pytest и compileall, затем PyInstaller. Он сохраняет исправление несовместимой сторонней ICU. Готовая папка — `dist/HDRScreenShare`.
-
-Исходный запуск без консоли — `./run.ps1` после сборки `./build-native.ps1`. Диагностика без Discord:
+Source launch: `./run.ps1`. Diagnostic tools do not start Discord sharing:
 
 ```powershell
-./build-native.ps1 -WithProbes
-.venv/Scripts/python.exe tools/probe_virtual_stream.py
-.venv/Scripts/python.exe tools/probe_audio.py
 .venv/Scripts/python.exe tools/probe_lifecycle.py
+.venv/Scripts/python.exe tools/probe_crash_cleanup.py
 ```
-
-Аудиопроба воспроизводит короткие тестовые тоны. Она записывает только виртуальный кабель в память, проверяет спектр и не сохраняет аудио. Пробы не звонят и не запускают трансляции Discord.
-
-При смене HDR/геометрии экранов нажмите «Обновить» и запустите захват снова. После ошибки звука также перезапустите захват. Журнал приложения: `%LOCALAPPDATA%/HDRScreenShare/app.log`; обычная работа не сохраняет кадры или звук в файлы.

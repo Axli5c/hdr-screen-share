@@ -49,6 +49,24 @@ def test_audio_failure_leaves_video_with_visible_error(app):
     assert events.count('release') == 1
 
 
+def test_virtual_screen_uses_discord_audio_without_relay(app):
+    controller, _, events = setup_controller(app, bad_audio=True)
+    controller.start('hdr', mode='screen')
+    assert controller.running
+    assert controller.audio is None
+    assert controller.audio_status == 'Audio: Discord system audio'
+    assert 'audio-start' not in events and 'audio-stop' not in events
+    controller.stop()
+
+
+def test_application_mode_keeps_filtered_audio(app):
+    controller, _, events = setup_controller(app)
+    controller.start('hdr', mode='application')
+    assert controller.audio is not None
+    assert 'audio-start' in events
+    controller.stop()
+
+
 def test_display_failure_is_retryable(app):
     controller, _, _ = setup_controller(app, bad_display=True)
     controller.start('hdr')

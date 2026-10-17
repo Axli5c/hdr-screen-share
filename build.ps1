@@ -20,6 +20,7 @@ try {
     New-Item -ItemType Directory -Force -Path 'dist/HDRScreenShare/docs' | Out-Null
     Copy-Item -LiteralPath 'docs/verification.md' -Destination 'dist/HDRScreenShare/docs'
     Copy-Item -LiteralPath 'docs/verification-v2.md' -Destination 'dist/HDRScreenShare/docs'
+    Copy-Item -LiteralPath 'docs/verification-v021.md' -Destination 'dist/HDRScreenShare/docs'
     Write-Output (Join-Path $PSScriptRoot 'dist/HDRScreenShare/HDRScreenShare.exe')
 }
 finally { Pop-Location }

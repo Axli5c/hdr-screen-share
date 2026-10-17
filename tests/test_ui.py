@@ -35,6 +35,20 @@ def test_preview_does_not_reduce_stream_resolution(app):
     preview.close(); stream.close()
 
 
+def test_modes_have_short_english_instructions(app):
+    sources = [CaptureSource('a', 'HDR', True, True, 3840, 2160, 0),
+               CaptureSource('b', 'own', False, False, 3840, 2160, 1, 3840, 0)]
+    window = control_for_test(app, sources, None, autostart=False)
+    assert window.share_mode.currentText() == 'Virtual screen'
+    assert 'system audio' in window.instruction.text().lower()
+    window.share_mode.setCurrentIndex(1)
+    assert window.share_mode.currentText() == 'Application window'
+    assert 'HDR Screen Share' in window.instruction.text()
+    assert window.start_button.text() == 'Start'
+    assert window.output.windowTitle() == 'HDR Screen Share'
+    window.close()
+
+
 def test_preview_owns_small_image_when_no_scaling_is_needed(app):
     from hdr_share.ui import PreviewWidget
     pixels = np.full((270, 480, 4), 20, np.uint8)
@@ -186,5 +200,5 @@ def test_target_removal_or_reposition_stops_output_safely(app):
         assert not running.isRunning()
         assert not window.timer.isActive()
         assert window.output.isHidden()
-        assert "монитор" in window.status.text().lower()
+        assert "display" in window.status.text().lower()
     window.close()

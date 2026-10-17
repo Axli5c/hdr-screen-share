@@ -40,7 +40,7 @@ class NativeAudioBridge:
         try:
             self.lib = C.CDLL(str(path))
         except OSError as error:
-            raise AudioError(f'Не удалось загрузить audio_bridge.dll: {error}') from error
+            raise AudioError(f'Cannot load audio_bridge.dll: {error}') from error
         signatures = {
             'ab_open': [C.c_wchar_p, C.POINTER(C.c_void_p)],
             'ab_stop': [C.c_void_p],
@@ -56,7 +56,7 @@ class NativeAudioBridge:
                 function.argtypes = arguments
                 function.restype = C.c_int32
         except AttributeError as error:
-            raise AudioError('Несовместимая версия audio_bridge.dll') from error
+            raise AudioError('Incompatible audio_bridge.dll') from error
 
     def _list(self, name, record):
         function = getattr(self.lib, name)
@@ -76,7 +76,7 @@ class NativeAudioBridge:
             if name == 'ab_list_audio_pids':
                 self.system_sounds_unavailable = code == 1
             return list(buffer[:count.value])
-        raise AudioError('Список аудиоустройств или процессов непрерывно меняется')
+        raise AudioError('Audio devices are changing. Restart capture.')
 
     def endpoints(self):
         return [{'id': item.id, 'name': item.name, 'default_roles': item.default_roles}
@@ -146,7 +146,7 @@ class AudioRelay:
                 return
             try:
                 active = self.bridge.audio_pids()
-                self.warning = ('Системные звуки Windows недоступны' if
+                self.warning = ('Windows system sounds unavailable' if
                     getattr(self.bridge, 'system_sounds_unavailable', False) else '')
                 processes = self.bridge.processes()
                 roots = select_capture_roots(processes, active, os.getpid())

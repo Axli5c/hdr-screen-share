@@ -6,7 +6,7 @@ import numpy as np
 
 def fit_size(width: int, height: int) -> tuple[int, int]:
     if width <= 0 or height <= 0:
-        raise ValueError("Размер кадра должен быть положительным")
+        raise ValueError("Frame dimensions must be positive")
     maximum = (3840, 2160) if width >= height else (2160, 3840)
     scale = min(1.0, maximum[0] / width, maximum[1] / height)
     return max(1, round(width * scale)), max(1, round(height * scale))

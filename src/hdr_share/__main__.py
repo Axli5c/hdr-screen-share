@@ -11,7 +11,12 @@ def main():
     parser = argparse.ArgumentParser(description="HDR to SDR screen relay for Discord")
     parser.add_argument("--smoke-seconds", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--diagnostics", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--display-guard", help=argparse.SUPPRESS)
+    parser.add_argument("--mode", choices=['screen', 'application'], default='screen')
     args = parser.parse_args()
+    if args.display_guard:
+        from .display_guard import run_guard
+        return run_guard(args.display_guard)
     import os
     logdir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "HDRScreenShare"
     logdir.mkdir(parents=True, exist_ok=True)
@@ -25,7 +30,7 @@ def main():
     app = QApplication(sys.argv[:1])
     app.setApplicationName("HDR Screen Share")
     app.setQuitOnLastWindowClosed(False)
-    window = ControlWindow()
+    window = ControlWindow(default_mode=args.mode)
     window.show()
     # Explicit quit follows successful worker shutdown, never the invisible output window.
     window.closed.connect(app.quit)

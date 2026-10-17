@@ -67,4 +67,4 @@ def test_disconnected_source_does_not_start_wrong_monitor():
     worker = CaptureWorker(SOURCE.id, LatestFrame(), sources=lambda: [])
     worker.start()
     assert worker.wait(2500)
-    assert "монитор" in worker.last_error.lower()
+    assert "display" in worker.last_error.lower()

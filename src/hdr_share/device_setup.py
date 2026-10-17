@@ -93,24 +93,25 @@ class DriverDownload(QThread):
 
 
 class DeviceSetupDialog(QDialog):
-    def __init__(self, parent=None, *, before_install=lambda: True):
+    def __init__(self, parent=None, *, before_install=lambda: True, mode='screen'):
         super().__init__(parent)
-        self.setWindowTitle('Первоначальная настройка')
+        self.setWindowTitle('Devices')
         self.setMinimumWidth(480)
         self.before_install = before_install
+        self.mode = mode
         self.download = self.installer = None
         layout = QVBoxLayout(self)
         self.status = QLabel('')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        self.display_button = QPushButton('Установить подписанный виртуальный экран')
-        self.cable_button = QPushButton('Открыть официальный сайт VB-CABLE')
-        self.check_button = QPushButton('Проверить устройства')
+        self.display_button = QPushButton('Install virtual display')
+        self.cable_button = QPushButton('Get VB-CABLE (window mode)')
+        self.cable_button.setVisible(mode == 'application')
+        self.check_button = QPushButton('Refresh')
         for button in (self.display_button, self.cable_button, self.check_button):
             layout.addWidget(button)
-        note = QLabel('Настройка нужна один раз. Экран устанавливается с запросом Windows UAC. '
-                      'VB-CABLE установите отдельно оригинальным установщиком производителя. '
-                      'Наушники оставьте устройством по умолчанию. Перезагрузка автоматически не выполняется.')
+        note = QLabel('Install once, then share in Discord.' if mode == 'screen' else
+                      'Window audio uses VB-CABLE. Keep your headphones as the default output.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.display_button.clicked.connect(self.start_download)
@@ -122,28 +123,28 @@ class DeviceSetupDialog(QDialog):
         self.check()
 
     def check(self):
-        result = check_devices()
-        self.status.setText('Устройства готовы' if result.ready else '\n'.join(result.issues))
+        result = check_devices(require_audio=self.mode == 'application')
+        self.status.setText('Devices ready' if result.ready else '\n'.join(result.issues))
         self.display_button.setEnabled(WindowsDisplayBackend().owned_display() is None)
 
     def start_download(self):
         self.display_button.setEnabled(False)
-        self.status.setText('Загрузка и проверка закреплённого пакета драйвера…')
+        self.status.setText('Downloading display driver…')
         self.download = DriverDownload(self)
         self.download.downloaded.connect(self.start_installer)
         self.download.failed.connect(self.failed)
         self.download.start()
 
     def failed(self, message):
-        self.status.setText('Настройка не выполнена: ' + message)
+        self.status.setText('Setup failed: ' + message)
         self.display_button.setEnabled(True)
 
     def start_installer(self, archive):
         try:
             if not self.before_install():
-                raise RuntimeError('Сначала остановите захват')
+                raise RuntimeError('Stop capture first')
             self.installer = ElevatedInstaller(archive)
-            self.status.setText('Работает установщик виртуального экрана…')
+            self.status.setText('Installing virtual display…')
             self.timer.start()
         except Exception as error:
             self.failed(str(error))
@@ -156,7 +157,7 @@ class DeviceSetupDialog(QDialog):
             self.timer.stop()
             self.installer = None
             if code:
-                self.failed(f'Установщик вернул код {code}. Журнал: %LOCALAPPDATA%/HDRScreenShare/device-install.log')
+                self.failed(f'Installer exit code {code}. Log: %LOCALAPPDATA%/HDRScreenShare/device-install.log')
             else:
                 backend = WindowsDisplayBackend()
                 if backend.owned_display() is not None:

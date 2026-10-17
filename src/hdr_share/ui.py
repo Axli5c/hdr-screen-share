@@ -40,7 +40,7 @@ def match_screen(source, screens):
 class OutputWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HDR Screen Share — Discord")
+        self.setWindowTitle("HDR Screen Share")
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
@@ -124,7 +124,7 @@ class PreviewWidget(QWidget):
         painter.fillRect(self.rect(), QColor("#0b1018"))
         if self.image.isNull():
             painter.setPen(QColor("#74849c"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Предпросмотр")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Preview")
         else:
             x, y = (self.width() - self.image.width()) // 2, (self.height() - self.image.height()) // 2
             painter.drawImage(x, y, self.image)
@@ -135,7 +135,7 @@ class ControlWindow(QWidget):
 
     def __init__(self, *, sources=list_sources, worker_factory=CaptureWorker,
                  screen_lookup=screen_for_source, autostart=True, controller=None,
-                 owned_display=None, affinity=exclude_control_from_capture):
+                 owned_display=None, affinity=exclude_control_from_capture, default_mode="screen"):
         super().__init__()
         from .stream import StreamController
         from .virtual_display import WindowsDisplayBackend
@@ -152,7 +152,7 @@ class ControlWindow(QWidget):
         self._last_stats_at = time.monotonic()
         self._verify_at = 0
         self._watched_screens = []
-        self.setWindowTitle("HDR Screen Share")
+        self.setWindowTitle("HDR Screen Share — Controls")
         self.setFixedWidth(528)
         self.setStyleSheet("""
             QWidget { background: #141923; color: #edf2fc; font-family: 'Segoe UI'; font-size: 13px; }
@@ -170,43 +170,48 @@ class ControlWindow(QWidget):
         title = QLabel("HDR → SDR")
         title.setObjectName("title")
         layout.addWidget(title)
-        hint = QLabel("Экран с HDR. Трансляция с нормальной яркостью.")
+        hint = QLabel("HDR screen to SDR for Discord.")
         hint.setObjectName("hint")
         layout.addWidget(hint)
         self.monitors = QComboBox()
         layout.addWidget(self.monitors)
+        self.share_mode = QComboBox()
+        self.share_mode.addItem("Virtual screen", "screen")
+        self.share_mode.addItem("Application window", "application")
+        self.share_mode.setCurrentIndex(self.share_mode.findData(default_mode))
+        layout.addWidget(self.share_mode)
         self.preview = PreviewWidget()
         layout.addWidget(self.preview)
         buttons = QHBoxLayout()
-        self.start_button = QPushButton("Запустить")
+        self.start_button = QPushButton("Start")
         self.start_button.setObjectName("start")
-        self.stop_button = QPushButton("Остановить")
-        self.refresh_button = QPushButton("Обновить")
+        self.stop_button = QPushButton("Stop")
+        self.refresh_button = QPushButton("Refresh")
         for button in (self.start_button, self.stop_button, self.refresh_button):
             buttons.addWidget(button)
         layout.addLayout(buttons)
-        self.status = QLabel("Видео остановлено")
-        self.audio_status = QLabel("Звук остановлен")
+        self.status = QLabel("Ready")
+        self.audio_status = QLabel("Audio: off")
         self.device_status = QLabel("")
         for label in (self.status, self.audio_status, self.device_status):
             label.setWordWrap(True)
             layout.addWidget(label)
-        self.stats = QLabel("До 4K · цель 60 FPS")
+        self.device_status.hide()
+        self.stats = QLabel("Up to 4K · 60 FPS target")
         self.stats.setObjectName("hint")
         layout.addWidget(self.stats)
-        instruction = QLabel("В Discord выберите окно приложения:\nHDR Screen Share — Discord\n"
-                             "Включите передачу звука приложения.\n"
-                             "Управление можно свернуть. Проверка вторым клиентом ещё не выполнена.")
-        instruction.setWordWrap(True)
-        instruction.setObjectName("hint")
-        layout.addWidget(instruction)
-        self.devices_button = QPushButton("Установка и проверка устройств")
+        self.instruction = QLabel("")
+        self.instruction.setWordWrap(True)
+        self.instruction.setObjectName("hint")
+        layout.addWidget(self.instruction)
+        self.devices_button = QPushButton("Devices")
         layout.addWidget(self.devices_button)
         self.start_button.clicked.connect(self.start_capture)
         self.stop_button.clicked.connect(self.stop_capture)
         self.refresh_button.clicked.connect(self.refresh_sources)
         self.devices_button.clicked.connect(self.show_devices)
         self.monitors.currentIndexChanged.connect(self.change_source)
+        self.share_mode.currentIndexChanged.connect(self.change_mode)
         self.controller.changed.connect(self.sync_state)
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -234,6 +239,7 @@ class ControlWindow(QWidget):
 
     def sync_state(self):
         self.status.setText(self.controller.video_status)
+        self.update_instruction()
         self.audio_status.setText(self.controller.audio_status)
         self.start_button.setEnabled(not self._running and self.monitors.count() > 0)
         self.stop_button.setEnabled(self._running or self.worker is not None or self.controller.lease is not None)
@@ -256,17 +262,30 @@ class ControlWindow(QWidget):
             self.monitors.blockSignals(True)
             self.monitors.clear()
             for source in self.sources:
-                hdr = "HDR" if source.hdr_enabled is True else "SDR" if source.hdr_enabled is False else "HDR неизвестен"
+                hdr = "HDR" if source.hdr_enabled is True else "SDR" if source.hdr_enabled is False else "Unknown"
                 screen = self._screen_lookup(source.id)
                 name = screen.name() if screen else source.label
                 self.monitors.addItem(f"{name} · {source.width}×{source.height} · {hdr}", source.id)
             self.monitors.setCurrentIndex(self.monitors.findData(selected.id))
-            self.controller.video_status = "Выберите монитор и запустите захват"
+            self.controller.video_status = "Ready"
         except Exception as error:
-            self.controller.video_status = f"Ошибка: {error}"
+            self.controller.video_status = f"Error: {error}"
         finally:
             self.monitors.blockSignals(False)
             self.sync_state()
+
+    def update_instruction(self):
+        if self.share_mode.currentData() == "screen":
+            number = getattr(self.controller, "target_number", None) if self._running else None
+            target = f"Screen {number}" if number else "the virtual screen"
+            self.instruction.setText(f"Discord: share {target} · System audio on")
+        else:
+            self.instruction.setText("Discord: share HDR Screen Share · App audio on")
+
+    def change_mode(self):
+        self.update_instruction()
+        if self._running:
+            self.start_capture()
 
     def change_source(self):
         if self._running:
@@ -280,7 +299,7 @@ class ControlWindow(QWidget):
         self._last_counts = (0, self.output.presented)
         self._last_stats_at = time.monotonic()
         self._verify_at = time.monotonic() + 1
-        self.controller.start(source_id)
+        self.controller.start(source_id, mode=self.share_mode.currentData())
         if self._running:
             self.timer.start()
         self.sync_state()
@@ -317,13 +336,13 @@ class ControlWindow(QWidget):
             captured = (worker.captured - self._last_counts[0]) / seconds
             painted = (self.output.presented - self._last_counts[1]) / seconds
             width, height = self.output.output_size
-            self.stats.setText(f"{width}×{height} · захват {captured:.1f} · вывод {painted:.1f} FPS")
+            self.stats.setText(f"{width}×{height} · {painted:.0f} FPS")
             self._last_counts = (worker.captured, self.output.presented)
             self._last_stats_at = now
 
     def show_devices(self):
         from .device_setup import DeviceSetupDialog
-        box = DeviceSetupDialog(self, before_install=self.stop_capture)
+        box = DeviceSetupDialog(self, before_install=self.stop_capture, mode=self.share_mode.currentData())
         box.exec()
 
     def showEvent(self, event):
@@ -332,7 +351,7 @@ class ControlWindow(QWidget):
             self._affinity_set = True
             self._preview_allowed = self._affinity(int(self.winId()))
             if not self._preview_allowed:
-                self.device_status.setText("Предпросмотр отключён: Windows не исключила окно управления из захвата.")
+                self.device_status.setText("Preview unavailable")
 
     def closeEvent(self, event):
         if self.stop_capture():
