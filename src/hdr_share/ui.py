@@ -42,8 +42,9 @@ class OutputWindow(QWidget):
         super().__init__()
         self.setWindowTitle("HDR Screen Share")
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
-        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        # Keep normal application-list eligibility. NOACTIVATE also hides the
+        # output from taskbar-style pickers; this attribute only avoids focus on show.
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.image = QImage()
         self._pixels = None

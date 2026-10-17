@@ -1,5 +1,7 @@
 """Bounded synthetic WGC probe. Does not open Discord or record user content."""
 import argparse
+import ctypes as C
+from ctypes import wintypes as W
 import json
 import threading
 import time
@@ -11,6 +13,33 @@ from PySide6.QtWidgets import QApplication
 from hdr_share.monitors import default_source, enable_physical_pixels, list_sources
 from hdr_share.ui import OutputWindow, match_screen
 from hdr_share.virtual_display import DisplayLease
+
+
+def inspect_window_source(hwnd, foreground_before):
+    """Check native application-list eligibility, independently of Qt flags."""
+    api = C.WinDLL('user32', use_last_error=True)
+    api.GetWindowLongPtrW.argtypes = [W.HWND, C.c_int]
+    api.GetWindowLongPtrW.restype = C.c_ssize_t
+    api.GetWindow.argtypes = [W.HWND, W.UINT]
+    api.GetWindow.restype = W.HWND
+    api.GetForegroundWindow.restype = W.HWND
+    api.IsWindowVisible.argtypes = [W.HWND]
+    api.IsIconic.argtypes = [W.HWND]
+    exstyle = api.GetWindowLongPtrW(hwnd, -20)
+    owner = api.GetWindow(hwnd, 4)
+    visible = bool(api.IsWindowVisible(hwnd)) and not api.IsIconic(hwnd)
+    title = C.create_unicode_buffer(512)
+    api.GetWindowTextW(W.HWND(hwnd), title, len(title))
+    enumerated = []
+    callback_type = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
+    callback = callback_type(lambda candidate, _: enumerated.append(candidate) or True)
+    api.EnumWindows(callback, 0)
+    # WS_EX_NOACTIVATE/TOOLWINDOW suppress normal application-list entries.
+    listed = (hwnd in enumerated and visible and title.value == 'HDR Screen Share'
+              and not (exstyle & (0x08000000 | 0x80))
+              and (not owner or bool(exstyle & 0x40000)))
+    return {'extended_style': hex(exstyle), 'application_list_eligible': bool(listed),
+            'show_preserved_focus': api.GetForegroundWindow() == foreground_before}
 
 
 def main():
@@ -43,7 +72,12 @@ def main():
             pixels[:, :, 3] = 255
             colors.append(pixels)
         output.set_frame(colors[0])
+        api = C.WinDLL('user32')
+        api.GetForegroundWindow.restype = W.HWND
+        foreground_before = api.GetForegroundWindow()
         output.show()
+        app.processEvents()
+        results.update(inspect_window_source(int(output.winId()), foreground_before))
         counter = [0]
 
         def change():
@@ -110,6 +144,7 @@ def main():
     results['colors'] = sorted(results['colors'])
     results['physical_unchanged'] = list_sources() == before
     results['passed'] = (results['sizes'] == [(3840, 2160)] and results['colors'] == [1, 2]
+                         and results['application_list_eligible'] and results['show_preserved_focus']
                          and results['physical_unchanged'] and not results['error'])
     print(json.dumps(results, ensure_ascii=True))
     return 0 if results['passed'] else 1

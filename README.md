@@ -1,4 +1,4 @@
-# HDR Screen Share 0.2.1
+# HDR Screen Share 0.2.2
 
 Convert an HDR monitor to SDR for Discord while keeping local HDR enabled.
 
