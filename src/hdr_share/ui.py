@@ -38,7 +38,7 @@ def match_screen(source, screens):
 
 
 class OutputWindow(QWidget):
-    def __init__(self):
+    def __init__(self, *, presenter_factory=None):
         super().__init__()
         self.setWindowTitle("HDR Screen Share")
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
@@ -53,13 +53,38 @@ class OutputWindow(QWidget):
         self.received = 0
         self._painted_sequence = 0
         self.target_screen = None
+        self._application_mode = False
+        self._presenter = None
+        self._presenter_size = None
+        self._presenter_factory = presenter_factory
         self.resize(1280, 720)
 
     def place_on(self, screen):
+        self.release_presenter()
+        self._application_mode = False
+        self.setAttribute(Qt.WidgetAttribute.WA_PaintOnScreen, False)
         self.target_screen = screen
         self.winId()
         self.windowHandle().setScreen(screen)
         self.move(screen.geometry().topLeft())
+
+    def place_for_application(self, width, height):
+        self.release_presenter()
+        self.target_screen = None
+        self._application_mode = True
+        self.setAttribute(Qt.WidgetAttribute.WA_PaintOnScreen)
+        self.output_size = fit_size(width, height)
+        ratio = self.devicePixelRatioF()
+        self.setFixedSize(max(1, round(self.output_size[0] / ratio)),
+                          max(1, round(self.output_size[1] / ratio)))
+        bounds = [screen.geometry() for screen in QApplication.screens()]
+        self.move(max(rect.right() for rect in bounds) + 65, min(rect.top() for rect in bounds))
+
+    def release_presenter(self):
+        if self._presenter is not None:
+            self._presenter.close()
+            self._presenter = None
+            self._presenter_size = None
 
     def set_frame(self, frame: np.ndarray):
         # LatestFrame hands over an owned array. Keep it alive for QImage's entire lifetime.
@@ -81,9 +106,30 @@ class OutputWindow(QWidget):
             if self.target_screen:
                 self.move(self.target_screen.geometry().topLeft())
         self.received += 1
+        if self._application_mode:
+            # A GPU swap chain keeps the complete surface alive outside desktop
+            # bounds, where Qt's ordinary raster backing store stops painting.
+            size = self.output_size
+            upload = frame
+            if size != (width, height):
+                scaled = self.image.scaled(*size, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                           Qt.TransformationMode.FastTransformation)
+                upload = np.frombuffer(scaled.constBits(), dtype=np.uint8).reshape(
+                    size[1], scaled.bytesPerLine())[:, :size[0] * 4].reshape(size[1], size[0], 4)
+            if self._presenter_size != size:
+                self.release_presenter()
+                from .video import VideoPresenter
+                self._presenter = (self._presenter_factory or VideoPresenter)(int(self.winId()), *size)
+                self._presenter_size = size
+            self._presenter.present(upload)
+            self.presented += 1
+            self._painted_sequence = self.received
+            return
         self.update()
 
     def paintEvent(self, event):
+        if self._application_mode:
+            return
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("black"))
         if not self.image.isNull():
@@ -93,6 +139,7 @@ class OutputWindow(QWidget):
                 self._painted_sequence = self.received
 
     def closeEvent(self, event):
+        self.release_presenter()
         event.accept()
 
 

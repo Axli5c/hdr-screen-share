@@ -64,3 +64,12 @@ def test_installed_disabled_adapter_does_not_require_reinstall():
         def registered(self): return True
         def owned_display(self): return None
     assert check_devices(display_backend=Display(), require_audio=False).ready
+
+
+def test_application_mode_does_not_require_display_driver():
+    from hdr_share.devices import check_devices
+    class Display:
+        def registered(self): raise AssertionError('Must not query driver for window mode')
+    class Audio:
+        def endpoints(self): return [{'name': 'CABLE Input (VB-Audio)', 'default_roles': []}]
+    assert check_devices(display_backend=Display(), audio_bridge=Audio(), require_display=False).ready

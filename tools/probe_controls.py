@@ -43,6 +43,9 @@ def main():
         results['audio_status'] = window.audio_status.text()
         results['display_status'] = window.display_status.text()
         results['output_size'] = window.output.output_size
+        results['adapter_absent_during_application'] = WindowsDisplayBackend().owned_display() is None
+        results['output_outside_desktop'] = all(not window.output.frameGeometry().intersects(s.geometry())
+                                                for s in app.screens())
         results['captured'] = window.worker.captured
         results['presented'] = window.output.presented
         window.grab().save(str(Path('.scratch/controls-v023.png').resolve()))
@@ -61,6 +64,8 @@ def main():
     results['passed'] = (not errors and all(results.get(key) for key in
         ['idle_without_worker', 'idle_physical_unchanged', 'before_live', 'after_live',
          'raw_released_when_off', 'stop_ok', 'physical_restored', 'adapter_absent']))
+    results['passed'] = (results['passed'] and results.get('adapter_absent_during_application')
+                         and results.get('output_outside_desktop'))
     print(json.dumps(results, ensure_ascii=True))
     return 0 if results['passed'] else 1
 

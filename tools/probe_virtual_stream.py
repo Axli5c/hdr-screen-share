@@ -47,24 +47,28 @@ def main():
     parser.add_argument('--seconds', type=int, default=6)
     parser.add_argument('--fps', type=int, default=4)
     parser.add_argument('--warmup', type=int, default=0)
+    parser.add_argument('--application', action='store_true')
     args = parser.parse_args()
     if not 3 <= args.seconds <= 75 or not 1 <= args.fps <= 60 or not 0 <= args.warmup <= 10:
         parser.error('seconds must be 3..75 and fps 1..60')
     enable_physical_pixels()
     before = list_sources()
-    lease = DisplayLease(default_source(before).id, 3840, 2160)
+    lease = None if args.application else DisplayLease(default_source(before).id, 3840, 2160)
     output = None
     stop = threading.Event()
     results = {'sizes': set(), 'colors': set(), 'frames': 0, 'unique_captures': 0, 'error': ''}
     worker = None
     try:
-        target = lease.acquire()
+        target = lease.acquire() if lease is not None else None
         app = QApplication([])
         output = OutputWindow()
-        screen = match_screen(target, app.screens())
-        if screen is None:
-            raise RuntimeError('Qt cannot identify the owned virtual screen')
-        output.place_on(screen)
+        if args.application:
+            output.place_for_application(3840, 2160)
+        else:
+            screen = match_screen(target, app.screens())
+            if screen is None:
+                raise RuntimeError('Qt cannot identify the owned virtual screen')
+            output.place_on(screen)
         colors = []
         for channel in (1, 2):
             pixels = np.zeros((2160, 3840, 4), dtype=np.uint8)
@@ -78,6 +82,7 @@ def main():
         output.show()
         app.processEvents()
         results.update(inspect_window_source(int(output.winId()), foreground_before))
+        results['outside_desktop'] = all(not output.frameGeometry().intersects(s.geometry()) for s in app.screens())
         counter = [0]
 
         def change():
@@ -139,12 +144,16 @@ def main():
             worker.join(timeout=3)
         if output is not None:
             output.hide()
-        lease.release()
+        if lease is not None:
+            lease.release()
+        if output is not None:
+            output.release_presenter()
     results['sizes'] = sorted(results['sizes'])
     results['colors'] = sorted(results['colors'])
     results['physical_unchanged'] = list_sources() == before
     results['passed'] = (results['sizes'] == [(3840, 2160)] and results['colors'] == [1, 2]
                          and results['application_list_eligible'] and results['show_preserved_focus']
+                         and (not args.application or results['outside_desktop'])
                          and results['physical_unchanged'] and not results['error'])
     print(json.dumps(results, ensure_ascii=True))
     return 0 if results['passed'] else 1

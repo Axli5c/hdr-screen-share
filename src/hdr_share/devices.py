@@ -44,14 +44,15 @@ def verify_signature(status: str, subject: str, publishers: set[str]) -> None:
         raise PackageError('Untrusted driver signature')
 
 
-def check_devices(*, display_backend=None, audio_bridge=None, require_audio=True) -> DeviceCheck:
+def check_devices(*, display_backend=None, audio_bridge=None, require_audio=True, require_display=True) -> DeviceCheck:
     from .virtual_display import WindowsDisplayBackend
     from .audio import NativeAudioBridge, AudioError
-    backend = display_backend if display_backend is not None else WindowsDisplayBackend()
     issues = []
-    installed = backend.registered() if hasattr(backend, 'registered') else backend.owned_display() is not None
-    if not installed:
-        issues.append('Virtual display is not installed')
+    if require_display:
+        backend = display_backend if display_backend is not None else WindowsDisplayBackend()
+        installed = backend.registered() if hasattr(backend, 'registered') else backend.owned_display() is not None
+        if not installed:
+            issues.append('Virtual display is not installed')
     if not require_audio:
         return DeviceCheck(not issues, issues)
     try:

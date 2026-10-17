@@ -105,6 +105,7 @@ class DeviceSetupDialog(QDialog):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.display_button = QPushButton('Install virtual display')
+        self.display_button.setVisible(mode == 'screen')
         self.cable_button = QPushButton('Get VB-CABLE (window mode)')
         self.cable_button.setVisible(mode == 'application')
         self.check_button = QPushButton('Refresh')
@@ -123,7 +124,7 @@ class DeviceSetupDialog(QDialog):
         self.check()
 
     def check(self):
-        result = check_devices(require_audio=self.mode == 'application')
+        result = check_devices(require_audio=self.mode == 'application', require_display=self.mode == 'screen')
         self.status.setText('Devices ready' if result.ready else '\n'.join(result.issues))
         self.display_button.setEnabled(not WindowsDisplayBackend.registered())
 

@@ -47,7 +47,7 @@ class StreamController(QObject):
     @staticmethod
     def topology(sources, source_id, target_id):
         selected = [source for source in sources if source.id in (source_id, target_id)]
-        if source_id == target_id or len(selected) != 2:
+        if source_id == target_id or len(selected) != (1 if target_id is None else 2):
             raise RuntimeError('Display unavailable')
         return tuple((s.id, s.index, s.left, s.top, s.width, s.height, s.hdr_enabled)
                      for s in sorted(selected, key=lambda s: s.id))
@@ -55,36 +55,43 @@ class StreamController(QObject):
     def start(self, source_id, mode="application"):
         if mode not in ("screen", "application"):
             raise ValueError("Unknown share mode")
-        self.mode = mode
         if not self.stop():
             return
+        self.mode = mode
+        self._target_id = None
         self.starting = True
         self.video_status = 'Starting…'
         self.audio_status = 'Audio: starting…' if mode == 'application' else 'Audio: Discord system audio'
-        self.display_status = 'Display: connecting…'
+        self.display_status = 'Display: connecting…' if mode == 'screen' else 'Display: application window'
         self.changed.emit()
         self.frames = FrameMailbox()
         self._sequence = 0
         self._source_id = source_id
         try:
+            # Drain removal notifications from the previous screen-mode lease
+            # while startup still suppresses topology callbacks.
+            QApplication.processEvents()
             source = next((s for s in self.sources() if s.id == source_id), None)
             if source is None:
                 raise RuntimeError('Source disconnected')
-            self.lease = self.lease_factory(source_id, *fit_size(source.width, source.height))
-            target = self.lease.acquire()
-            self._target_id = target.id
-            self.target_number = target.index + 1
-            self.display_status = f'Display: Screen {self.target_number} · connected'
-            # Flush the screen-added notification while startup ignores topology events.
-            QApplication.processEvents()
-            screen = self.screen_lookup(target.id)
-            if screen is None:
-                raise RuntimeError('Virtual display unavailable')
-            self._topology = self.topology(self.sources(), source_id, target.id)
-            self.output.place_on(screen)
-            ratio = screen.devicePixelRatio()
-            self.output.setFixedSize(max(1, round(target.width / ratio)), max(1, round(target.height / ratio)))
-            self.output.move(screen.geometry().topLeft())
+            if mode == 'screen':
+                self.lease = self.lease_factory(source_id, *fit_size(source.width, source.height))
+                target = self.lease.acquire()
+                self._target_id = target.id
+                self.target_number = target.index + 1
+                self.display_status = f'Display: Screen {self.target_number} · connected'
+                # Flush screen-added notifications before topology watching resumes.
+                QApplication.processEvents()
+                screen = self.screen_lookup(target.id)
+                if screen is None:
+                    raise RuntimeError('Virtual display unavailable')
+                self.output.place_on(screen)
+                ratio = screen.devicePixelRatio()
+                self.output.setFixedSize(max(1, round(target.width / ratio)), max(1, round(target.height / ratio)))
+                self.output.move(screen.geometry().topLeft())
+            else:
+                self.output.place_for_application(*fit_size(source.width, source.height))
+            self._topology = self.topology(self.sources(), source_id, self._target_id)
             self.output.show()
             self.worker = self.worker_factory(source_id, self.frames)
             worker = self.worker
@@ -133,6 +140,7 @@ class StreamController(QObject):
 
     def stop(self):
         self.output.hide()
+        self.output.release_presenter()
         self.running = False
         if self.audio is not None:
             self.audio.stop()
@@ -190,4 +198,9 @@ class StreamController(QObject):
         item = self.frames.latest_after(self._sequence)
         if item is not None:
             self._sequence, pixels, _ = item
-            self.output.set_frame(pixels)
+            try:
+                self.output.set_frame(pixels)
+            except Exception as error:
+                self.stop()
+                self.video_status = f'Output error: {error}'
+                self.changed.emit()

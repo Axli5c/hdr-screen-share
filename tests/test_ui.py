@@ -44,7 +44,7 @@ def test_default_launch_waits_for_start_even_after_mode_and_comparison_change(ap
         assert not controller.running and 'acquire' not in events
         window.start_button.click()
         pump(app, lambda: controller.worker is not None and controller.worker.captured > 0)
-        assert window.display_status.text().endswith('connected')
+        assert window.display_status.text() == 'Display: application window'
         window.stop_button.click()
         assert window.display_status.text() == 'Display: off'
         assert window.audio_status.text() == 'Audio: off'
@@ -91,6 +91,25 @@ def test_preview_does_not_reduce_stream_resolution(app):
     assert preview.image.width() <= 480 and preview.image.height() <= 270
     assert stream.output_size == (3840, 2160)
     preview.close(); stream.close()
+
+
+def test_application_output_downscales_oversized_source_before_gpu_upload(app):
+    submitted = []
+    class Presenter:
+        def __init__(self, hwnd, width, height): self.size = (width, height)
+        def present(self, pixels):
+            assert (pixels.shape[1], pixels.shape[0]) == self.size
+            submitted.append((self.size, pixels[0, 0].tolist()))
+        def close(self): pass
+    output = OutputWindow(presenter_factory=Presenter)
+    try:
+        output.place_for_application(5120, 1440)
+        frame = np.full((1440, 5120, 4), (20, 40, 60, 255), np.uint8)
+        output.set_frame(frame)
+        assert submitted == [((3840, 1080), [20, 40, 60, 255])]
+        assert output.output_size == (3840, 1080)
+    finally:
+        output.close()
 
 
 def test_modes_have_short_english_instructions(app):

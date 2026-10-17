@@ -14,6 +14,8 @@ try {
     if (-not $TestsOnly) {
         $commands += ('cl /nologo /EHsc /std:c++17 /W4 /MD /O2 /LD /DUNICODE /D_UNICODE /I "' + $PSScriptRoot + '\native" "' + $PSScriptRoot + '\native\audio_bridge.cpp" /Fo:"' + $out + '\audio_bridge.obj" /Fe:"' + $out + '\audio_bridge.dll" /link /IMPLIB:"' + $out + '\audio_bridge.lib" ole32.lib mmdevapi.lib uuid.lib propsys.lib advapi32.lib')
         $commands += 'if errorlevel 1 exit /b 1'
+        $commands += ('cl /nologo /EHsc /std:c++17 /W4 /MD /O2 /LD /DUNICODE /D_UNICODE /DNOMINMAX "' + $PSScriptRoot + '\native\video_presenter.cpp" /Fo:"' + $out + '\video_presenter.obj" /Fe:"' + $out + '\video_presenter.dll" /link /IMPLIB:"' + $out + '\video_presenter.lib" d3d11.lib dxgi.lib user32.lib')
+        $commands += 'if errorlevel 1 exit /b 1'
     }
     if ($WithProbes) {
         $commands += ('cl /nologo /EHsc /std:c++17 /W4 /MD /O2 /DUNICODE /D_UNICODE "' + $PSScriptRoot + '\native\tests\tone.cpp" /Fo:"' + $out + '\tone.obj" /Fe:"' + $out + '\tone.exe" /link ole32.lib uuid.lib')
