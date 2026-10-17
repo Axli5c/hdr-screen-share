@@ -95,52 +95,88 @@ class OutputWindow(QWidget):
         event.accept()
 
 
+def exclude_control_from_capture(hwnd):
+    import ctypes as C
+    from ctypes import wintypes as W
+    api = C.WinDLL("user32", use_last_error=True)
+    api.SetWindowDisplayAffinity.argtypes = [W.HWND, W.DWORD]
+    api.SetWindowDisplayAffinity.restype = W.BOOL
+    return bool(api.SetWindowDisplayAffinity(hwnd, 0x11))
+
+
+class PreviewWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(480, 270)
+        self.image = QImage()
+        self.received = 0
+
+    def set_frame(self, pixels):
+        height, width, _ = pixels.shape
+        image = QImage(pixels.data, width, height, pixels.strides[0], QImage.Format.Format_ARGB32)
+        self.image = image.scaled(480, 270, Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.FastTransformation).copy()
+        self.received += 1
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#0b1018"))
+        if self.image.isNull():
+            painter.setPen(QColor("#74849c"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Предпросмотр")
+        else:
+            x, y = (self.width() - self.image.width()) // 2, (self.height() - self.image.height()) // 2
+            painter.drawImage(x, y, self.image)
+
+
 class ControlWindow(QWidget):
     closed = Signal()
 
     def __init__(self, *, sources=list_sources, worker_factory=CaptureWorker,
-                 screen_lookup=screen_for_source, autostart=True):
+                 screen_lookup=screen_for_source, autostart=True, controller=None,
+                 owned_display=None, affinity=exclude_control_from_capture):
         super().__init__()
-        self._sources = sources
-        self._worker_factory = worker_factory
-        self._screen_lookup = screen_lookup
-        self.worker = None
-        self.frames = LatestFrame()
-        self.output = OutputWindow()
-        self._running = False
-        self._failed = False
+        from .stream import StreamController
+        from .virtual_display import WindowsDisplayBackend
+        self._sources, self._screen_lookup = sources, screen_lookup
+        self._owned_display = owned_display or WindowsDisplayBackend().owned_display
+        self._affinity = affinity
+        self._affinity_set = False
+        self._preview_allowed = True
+        self.controller = controller or StreamController(sources=sources, worker_factory=worker_factory,
+                                                        screen_lookup=screen_lookup)
+        self.output = self.controller.output
+        self._preview_sequence = 0
         self._last_counts = (0, 0)
         self._last_stats_at = time.monotonic()
-        self._topology = ()
-        self._verify_at = 0.0
+        self._verify_at = 0
         self._watched_screens = []
         self.setWindowTitle("HDR Screen Share")
-        self.setMinimumWidth(490)
+        self.setFixedWidth(528)
         self.setStyleSheet("""
             QWidget { background: #141923; color: #edf2fc; font-family: 'Segoe UI'; font-size: 13px; }
-            QLabel#title { font-size: 24px; font-weight: 650; }
+            QLabel#title { font-size: 25px; font-weight: 650; }
             QLabel#hint { color: #aab8ce; }
-            QComboBox { padding: 10px; background: #202a3b; border: 1px solid #39465c; border-radius: 6px; }
-            QPushButton { padding: 10px 16px; background: #324766; border: 0; border-radius: 6px; }
+            QComboBox { padding: 9px; background: #202a3b; border: 1px solid #39465c; border-radius: 6px; }
+            QPushButton { padding: 9px 13px; background: #324766; border: 0; border-radius: 6px; }
             QPushButton:hover { background: #425d84; }
             QPushButton#start { background: #5265dc; }
             QPushButton:disabled { color: #7d899b; background: #252c39; }
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
         title = QLabel("HDR → SDR")
         title.setObjectName("title")
         layout.addWidget(title)
-        hint = QLabel("Нормальная яркость для зрителей Discord")
+        hint = QLabel("Экран с HDR. Трансляция с нормальной яркостью.")
         hint.setObjectName("hint")
         layout.addWidget(hint)
-        layout.addWidget(QLabel("Монитор для трансляции"))
         self.monitors = QComboBox()
         layout.addWidget(self.monitors)
-        layout.addWidget(QLabel("Второй монитор — окно для Discord"))
-        self.outputs = QComboBox()
-        layout.addWidget(self.outputs)
+        self.preview = PreviewWidget()
+        layout.addWidget(self.preview)
         buttons = QHBoxLayout()
         self.start_button = QPushButton("Запустить")
         self.start_button.setObjectName("start")
@@ -149,43 +185,68 @@ class ControlWindow(QWidget):
         for button in (self.start_button, self.stop_button, self.refresh_button):
             buttons.addWidget(button)
         layout.addLayout(buttons)
-        self.status = QLabel("Готово к запуску")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        self.status = QLabel("Видео остановлено")
+        self.audio_status = QLabel("Звук остановлен")
+        self.device_status = QLabel("")
+        for label in (self.status, self.audio_status, self.device_status):
+            label.setWordWrap(True)
+            layout.addWidget(label)
         self.stats = QLabel("До 4K · цель 60 FPS")
         self.stats.setObjectName("hint")
         layout.addWidget(self.stats)
-        instruction = QLabel("В Discord выберите трансляцию приложения:\n"
-                             "HDR Screen Share — Discord\n\n"
-                             "Окно-копия открывается на втором мониторе.\n"
-                             "Его можно перекрывать окнами, но нельзя сворачивать.\n"
-                             "Звук игры эта версия не передаёт.")
-        instruction.setObjectName("hint")
+        instruction = QLabel("В Discord выберите окно приложения:\nHDR Screen Share — Discord\n"
+                             "Включите передачу звука приложения.\n"
+                             "Управление можно свернуть. Проверка вторым клиентом ещё не выполнена.")
         instruction.setWordWrap(True)
+        instruction.setObjectName("hint")
         layout.addWidget(instruction)
+        self.devices_button = QPushButton("Установка и проверка устройств")
+        layout.addWidget(self.devices_button)
         self.start_button.clicked.connect(self.start_capture)
         self.stop_button.clicked.connect(self.stop_capture)
         self.refresh_button.clicked.connect(self.refresh_sources)
+        self.devices_button.clicked.connect(self.show_devices)
         self.monitors.currentIndexChanged.connect(self.change_source)
-        self.outputs.currentIndexChanged.connect(self.change_output)
+        self.controller.changed.connect(self.sync_state)
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(4)
         self.timer.timeout.connect(self.present_latest)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setInterval(67)
+        self.preview_timer.timeout.connect(self.present_preview)
+        self.preview_timer.start()
         app = QApplication.instance()
         app.screenRemoved.connect(self.display_changed)
         app.screenAdded.connect(self.display_changed)
         self.refresh_sources()
-        self.stop_button.setEnabled(False)
         if autostart:
             QTimer.singleShot(0, self.start_capture)
+
+    @property
+    def worker(self): return self.controller.worker
+
+    @property
+    def frames(self): return self.controller.frames
+
+    @property
+    def _running(self): return self.controller.running
+
+    def sync_state(self):
+        self.status.setText(self.controller.video_status)
+        self.audio_status.setText(self.controller.audio_status)
+        self.start_button.setEnabled(not self._running and self.monitors.count() > 0)
+        self.stop_button.setEnabled(self._running or self.worker is not None)
+        if not self._running:
+            self.timer.stop()
 
     def refresh_sources(self):
         if not self.stop_capture():
             return
         previous = self.monitors.currentData()
         try:
-            self.sources = self._sources()
+            owned = self._owned_display()
+            self.sources = [source for source in self._sources() if source.id != owned]
             for screen in QApplication.screens():
                 if screen not in self._watched_screens:
                     screen.geometryChanged.connect(self.display_changed)
@@ -194,167 +255,88 @@ class ControlWindow(QWidget):
             selected = next((s for s in self.sources if s.id == previous), None) or default_source(self.sources)
             self.monitors.blockSignals(True)
             self.monitors.clear()
-            for number, source in enumerate(self.sources, 1):
-                hdr = "HDR включён" if source.hdr_enabled is True else "SDR" if source.hdr_enabled is False else "HDR неизвестен"
-                primary = " · основной" if source.primary else ""
+            for source in self.sources:
+                hdr = "HDR" if source.hdr_enabled is True else "SDR" if source.hdr_enabled is False else "HDR неизвестен"
                 screen = self._screen_lookup(source.id)
                 name = screen.name() if screen else source.label
-                self.monitors.addItem(f"{name} · {source.width}×{source.height} · {hdr}{primary}", source.id)
+                self.monitors.addItem(f"{name} · {source.width}×{source.height} · {hdr}", source.id)
             self.monitors.setCurrentIndex(self.monitors.findData(selected.id))
-            self.populate_outputs()
-            self.start_button.setEnabled(True)
-            self.status.setText("Выберите монитор и запустите захват")
-        except Exception as exc:
-            self.status.setText(f"Ошибка: {exc}")
-            self.start_button.setEnabled(False)
+            self.controller.video_status = "Выберите монитор и запустите захват"
+        except Exception as error:
+            self.controller.video_status = f"Ошибка: {error}"
         finally:
             self.monitors.blockSignals(False)
+            self.sync_state()
 
     def change_source(self):
-        self.populate_outputs()
-        if self._running:
-            self.start_capture()
-
-    def populate_outputs(self):
-        previous = self.outputs.currentData()
-        selected = choose_output([s.id for s in self.sources], self.monitors.currentData(), previous)
-        self.outputs.blockSignals(True)
-        self.outputs.clear()
-        for number, source in enumerate(self.sources, 1):
-            if source.id != self.monitors.currentData():
-                screen = self._screen_lookup(source.id)
-                name = screen.name() if screen else source.label
-                self.outputs.addItem(f"{name} · {source.width}×{source.height}", source.id)
-        self.outputs.setCurrentIndex(self.outputs.findData(selected))
-        self.outputs.blockSignals(False)
-
-    def change_output(self):
         if self._running:
             self.start_capture()
 
     def start_capture(self):
-        if not self.stop_capture():
-            return
         source_id = self.monitors.currentData()
         if source_id is None:
             return
-        target_id = self.outputs.currentData()
-        screen = self._screen_lookup(target_id) if target_id else None
-        if screen is None:
-            self.status.setText("Для окна Discord нужен второй подключённый монитор. Обновите список.")
-            return
-        self.frames = LatestFrame()
-        try:
-            self._topology = self.topology(self._sources(), source_id, target_id)
-        except Exception as exc:
-            self.status.setText(f"Конфигурация мониторов недоступна: {exc}")
-            return
-        self._verify_at = time.monotonic() + 1
-        worker = self._worker_factory(source_id, self.frames)
-        self.worker = worker
-        self._running = True
-        self._failed = False
+        self._preview_sequence = 0
         self._last_counts = (0, self.output.presented)
         self._last_stats_at = time.monotonic()
-        worker.ready.connect(lambda hdr: self.on_ready(worker, hdr))
-        worker.failed.connect(lambda error: self.on_error(worker, error))
-        worker.finished.connect(lambda: self.on_finished(worker))
-        self.status.setText("Запуск захвата…")
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.output.place_on(screen)
-        self.output.show()
-        self.timer.start()
-        worker.start()
-
-    def on_ready(self, worker, hdr):
-        if worker is self.worker and self._running:
-            self.status.setText("HDR → SDR · захват работает" if hdr else "SDR · HDR на этом мониторе выключен")
-
-    def on_error(self, worker, message):
-        if worker is self.worker:
-            self._failed = True
-            self.status.setText(f"Ошибка захвата: {message}")
-
-    def on_finished(self, worker):
-        if worker is self.worker:
-            self._running = False
-            self.timer.stop()
-            self.output.hide()
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
+        self._verify_at = time.monotonic() + 1
+        self.controller.start(source_id)
+        if self._running:
+            self.timer.start()
+        self.sync_state()
 
     def stop_capture(self):
-        worker = self.worker
-        if worker is not None:
-            worker.request_stop()
-            if not worker.wait(3000):
-                self.status.setText("Ожидание остановки захвата… Повторите через несколько секунд.")
-                return False
-            self.worker = None
-            worker.deleteLater()
-        self._running = False
-        self.timer.stop()
-        self.frames.take()
-        self.output.hide()
-        self.start_button.setEnabled(self.monitors.count() > 0)
-        self.stop_button.setEnabled(False)
-        if not self._failed:
-            self.status.setText("Захват остановлен")
-        return True
-
-    @staticmethod
-    def topology(sources, source_id, target_id):
-        selected = {s.id: s for s in sources if s.id in (source_id, target_id)}
-        if source_id == target_id or len(selected) != 2:
-            raise RuntimeError("Нужны два разных подключённых монитора")
-        return tuple((s.id, s.index, s.left, s.top, s.width, s.height, s.hdr_enabled)
-                     for s in sorted(selected.values(), key=lambda s: s.id))
+        result = self.controller.stop()
+        self.sync_state()
+        return result
 
     def display_changed(self, *args):
-        if self._running:
-            # Hide first: Windows may migrate an orphaned window onto the captured display.
-            self.output.hide()
-            self.stop_capture()
-            self.status.setText("Конфигурация мониторов изменилась. Нажмите «Обновить» и запустите снова.")
+        self.controller.display_changed(*args)
 
     def verify_displays(self):
-        if not self._running:
+        self.controller.verify_displays()
+        self.sync_state()
+
+    def present_preview(self):
+        if not self._running or self.isMinimized() or not self._preview_allowed:
             return
-        try:
-            current = self.topology(self._sources(), self.monitors.currentData(), self.outputs.currentData())
-            if current != self._topology:
-                self.display_changed()
-        except Exception:
-            self.display_changed()
+        item = self.frames.latest_after(self._preview_sequence)
+        if item is not None:
+            self._preview_sequence, pixels, _ = item
+            self.preview.set_frame(pixels)
 
     def present_latest(self):
+        self.controller.present_latest()
         now = time.monotonic()
         if now >= self._verify_at:
             self._verify_at = now + 1
             self.verify_displays()
-            if not self._running:
-                return
-        frame = self.frames.take()
-        if frame is not None:
-            self.output.set_frame(frame)
         worker = self.worker
-        now = time.monotonic()
         if worker and now - self._last_stats_at >= 1:
             seconds = now - self._last_stats_at
             captured = (worker.captured - self._last_counts[0]) / seconds
             painted = (self.output.presented - self._last_counts[1]) / seconds
             width, height = self.output.output_size
-            self.stats.setText(f"{width}×{height} · захват {captured:.1f} FPS · отрисовка {painted:.1f} FPS")
-            if worker.frame_size != (0, 0) and worker.frame_size != self.output.output_size:
-                self.stats.setText(self.stats.text() + "\nРазмер вывода ограничен вторым монитором / пределом 4K")
+            self.stats.setText(f"{width}×{height} · захват {captured:.1f} · вывод {painted:.1f} FPS")
             self._last_counts = (worker.captured, self.output.presented)
             self._last_stats_at = now
-            if worker.last_frame_at and now - worker.last_frame_at > 3:
-                self.stats.setText(self.stats.text() + " · нет новых кадров / статичный экран")
+
+    def show_devices(self):
+        from .device_setup import DeviceSetupDialog
+        box = DeviceSetupDialog(self, before_install=self.stop_capture)
+        box.exec()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._affinity_set:
+            self._affinity_set = True
+            self._preview_allowed = self._affinity(int(self.winId()))
+            if not self._preview_allowed:
+                self.device_status.setText("Предпросмотр отключён: Windows не исключила окно управления из захвата.")
 
     def closeEvent(self, event):
         if self.stop_capture():
+            self.preview_timer.stop()
             self.output.close()
             event.accept()
             self.closed.emit()

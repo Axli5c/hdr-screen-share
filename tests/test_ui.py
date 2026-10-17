@@ -9,6 +9,71 @@ from hdr_share.monitors import CaptureSource
 from hdr_share.capture import CaptureWorker
 
 
+def control_for_test(app, sources, factory, autostart=True, affinity=lambda hwnd: True):
+    from hdr_share.stream import StreamController
+    target_id = sources[0].id if sources[0].id == 'sdr' else 'b'
+    class Lease:
+        def acquire(self): return next(s for s in sources if s.id == target_id)
+        def release(self): pass
+    def no_audio(): raise RuntimeError('test audio disabled')
+    controller = StreamController(sources=lambda: sources, worker_factory=factory,
+        lease_factory=lambda *args: Lease(), audio_factory=no_audio,
+        screen_lookup=lambda _: app.primaryScreen())
+    return ControlWindow(sources=lambda: sources, controller=controller,
+        screen_lookup=lambda _: app.primaryScreen(), autostart=autostart,
+        owned_display=lambda: target_id, affinity=affinity)
+
+
+def test_preview_does_not_reduce_stream_resolution(app):
+    from hdr_share.ui import PreviewWidget
+    pixels = np.zeros((2160, 3840, 4), np.uint8)
+    preview, stream = PreviewWidget(), OutputWindow()
+    preview.set_frame(pixels)
+    stream.set_frame(pixels)
+    assert preview.image.width() <= 480 and preview.image.height() <= 270
+    assert stream.output_size == (3840, 2160)
+    preview.close(); stream.close()
+
+
+def test_preview_owns_small_image_when_no_scaling_is_needed(app):
+    from hdr_share.ui import PreviewWidget
+    pixels = np.full((270, 480, 4), 20, np.uint8)
+    preview = PreviewWidget()
+    preview.set_frame(pixels)
+    pixels[:] = 99
+    assert preview.image.pixelColor(0, 0).red() == 20
+    preview.close()
+
+
+def test_control_exclusion_does_not_exclude_stream_hwnd(app):
+    sources = [CaptureSource('a', 'HDR', True, True, 3840, 2160, 0),
+               CaptureSource('b', 'own', False, False, 3840, 2160, 1, 3840, 0)]
+    calls = []
+    window = control_for_test(app, sources, None, autostart=False,
+                              affinity=lambda hwnd: calls.append(hwnd) or True)
+    window.show()
+    app.processEvents()
+    assert calls == [int(window.winId())]
+    assert int(window.output.winId()) not in calls
+    assert window.monitors.count() == 1
+    assert window.monitors.currentData() == 'a'
+    window.close()
+
+
+def test_minimize_pauses_preview_not_stream(app):
+    sources = [CaptureSource('a', 'HDR', True, True, 3840, 2160, 0),
+               CaptureSource('b', 'own', False, False, 3840, 2160, 1, 3840, 0)]
+    window = control_for_test(app, sources, None, autostart=False)
+    window.controller.running = True
+    window.controller.frames.publish(np.zeros((8, 16, 4), np.uint8), 0)
+    window.showMinimized()
+    window.present_preview()
+    window.present_latest()
+    assert window.preview.received == 0
+    assert window.output.received == 1
+    window.close()
+
+
 def pump(app, condition, seconds=2):
     deadline = time.monotonic() + seconds
     while not condition() and time.monotonic() < deadline:
@@ -79,8 +144,7 @@ def test_start_error_retry_and_shutdown(app):
         return CaptureWorker(source_id, slot, sources=lambda: sources,
                              factory=lambda index, mode: Session())
 
-    window = ControlWindow(sources=lambda: sources, worker_factory=factory,
-                           screen_lookup=lambda _: app.primaryScreen())
+    window = control_for_test(app, sources, factory)
     pump(app, lambda: "GPU unavailable" in window.status.text())
     assert created == ["hdr"]
     window.start_capture()
@@ -109,8 +173,7 @@ def test_target_removal_or_reposition_stops_output_safely(app):
         return CaptureWorker(source_id, slot, sources=lambda: sources,
                              factory=lambda index, mode: Session())
 
-    window = ControlWindow(sources=lambda: sources, worker_factory=factory,
-                           screen_lookup=lambda _: app.primaryScreen(), autostart=False)
+    window = control_for_test(app, sources, factory, autostart=False)
     for remove in (False, True):
         window.start_capture()
         pump(app, lambda: window.worker is not None and window.worker.captured > 0)

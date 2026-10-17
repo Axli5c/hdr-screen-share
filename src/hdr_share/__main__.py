@@ -40,6 +40,8 @@ def main():
                     "output_size": window.output.output_size,
                     "status": window.status.text(), "error": worker.last_error if worker else "",
                     "stats": window.stats.text()}
+            data['audio_status'] = window.audio_status.text()
+            data['audio_stats'] = window.controller.audio.stats() if window.controller.audio else None
             if worker and worker.started_at:
                 elapsed = time.monotonic() - worker.started_at
                 data.update(elapsed_seconds=elapsed, captured_fps=worker.captured / elapsed,

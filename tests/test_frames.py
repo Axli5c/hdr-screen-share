@@ -1,4 +1,30 @@
 import numpy as np
+
+
+def test_mailbox_two_consumers_read_same_frame_independently():
+    from hdr_share.frames import FrameMailbox
+    box = FrameMailbox()
+    original = np.zeros((2, 3, 4), np.uint8)
+    sequence = box.publish(original, 1.5)
+    first = box.latest_after(0)
+    second = box.latest_after(0)
+    assert first[0] == second[0] == sequence
+    assert first[1] is second[1]
+    assert first[2] == 1.5
+    original[:] = 99
+    assert not first[1].any()
+    assert not first[1].flags.writeable
+    assert box.latest_after(sequence) is None
+
+
+def test_mailbox_slow_consumer_receives_only_latest():
+    from hdr_share.frames import FrameMailbox
+    box = FrameMailbox()
+    for index in range(10):
+        box.publish(np.full((2, 3, 4), index, np.uint8), float(index))
+    sequence, frame, timestamp = box.latest_after(0)
+    assert sequence == 10 and timestamp == 9
+    assert np.all(frame == 9)
 import pytest
 
 from hdr_share.frames import LatestFrame, fit_size

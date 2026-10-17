@@ -1,0 +1,15 @@
+{
+  "vdd": {
+    "url": "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/download/25.5.2/Signed-Driver-v24.12.24-x64.zip",
+    "sha256": "F93E7CE3D640C83C419B1B72D2C83B2D8E34D83E8B7BA11F3328A40D2DA82FA4",
+    "publishers": ["SignPath Foundation"],
+    "required": ["MttVDD.inf", "mttvdd.cat", "MttVDD.dll", "vdd_settings.xml"],
+    "source_commit": "b07c8cc80c95042a8b5a1a97e67c8e4a51ab8c10"
+  },
+  "vbcable": {
+    "url": "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip",
+    "sha256": "B950E39F01AF1D04EA623C8F6D8EB9B6EA5C477C637295FABF20631C85116BFB",
+    "publishers": ["BUREL VINCENT Entrepreneur individuel", "Microsoft Windows Hardware Compatibility Publisher"],
+    "required": ["VBCABLE_Setup_x64.exe", "vbMmeCable64_win10.inf", "vbaudio_cable64_win10.cat", "vbaudio_cable64_win10.sys"]
+  }
+}

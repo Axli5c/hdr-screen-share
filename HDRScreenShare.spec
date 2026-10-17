@@ -2,6 +2,10 @@
 from PyInstaller.utils.hooks import collect_all
 
 datas, binaries, hiddenimports = collect_all('hdrcapture')
+binaries.append(('build/native/audio_bridge.dll', '.'))
+datas += [('scripts/install-devices.ps1', 'scripts'),
+          ('scripts/vdd-config.ps1', 'scripts'),
+          ('scripts/device-packages.json', 'scripts')]
 a = Analysis(['app.py'], pathex=['src'], binaries=binaries, datas=datas,
              hiddenimports=hiddenimports,
              runtime_hooks=['packaging_diagnostics.py'],
@@ -15,6 +19,7 @@ a.binaries = [entry for entry in a.binaries
               if entry[0].lower() not in {'icuuc.dll', 'icuin.dll', 'icudt78.dll'}]
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='HDRScreenShare',
+          version='packaging_version.txt',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=False, disable_windowed_traceback=False)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='HDRScreenShare')
