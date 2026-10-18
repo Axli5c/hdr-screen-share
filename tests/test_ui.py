@@ -9,6 +9,69 @@ from hdr_share.monitors import CaptureSource
 from hdr_share.capture import CaptureWorker
 
 
+def test_startup_warns_once_and_only_blocks_the_mode_missing_its_driver(app):
+    from test_stream import setup_controller
+    from test_device_setup import wait_for
+    from hdr_share.devices import DependencyStatus
+    controller, sources, events = setup_controller(app)
+    snapshot = [DependencyStatus('vdd', 'Virtual Display Driver', 'missing', 'Install display'),
+                DependencyStatus('vbcable', 'VB-CABLE', 'ready', 'Ready')]
+    window = ControlWindow(sources=lambda: sources, controller=controller,
+        owned_display=lambda: 'own', screen_lookup=lambda _: app.primaryScreen(),
+        affinity=lambda _: True, dependency_probe=lambda: list(snapshot))
+    try:
+        window.show()
+        wait_for(app, lambda: window._device_dialog is not None and bool(window._device_dialog.results))
+        box = window._device_dialog
+        assert box.isVisible()
+        box.reject()
+        window.start_button.click()
+        assert not controller.running and box.isVisible()
+        wait_for(app, lambda: box.worker is None)
+        box.reject()
+        window.share_mode.setCurrentIndex(1)
+        wait_for(app, lambda: box.worker is None)
+        window.start_button.click()
+        assert controller.running
+        window.share_mode.setCurrentIndex(0)
+        assert not controller.running and box.isVisible()
+        wait_for(app, lambda: box.worker is None)
+        box.reject()
+        window.stop_button.click()
+        box.check()
+        wait_for(app, lambda: box.worker is None)
+        assert not box.isVisible()  # Background checks do not reopen a dismissed warning.
+    finally:
+        window.close()
+
+
+def test_start_waits_for_current_dependency_check(app):
+    import threading
+    from test_stream import setup_controller
+    from test_device_setup import wait_for
+    from hdr_share.devices import DependencyStatus
+    release = threading.Event()
+    controller, sources, _ = setup_controller(app)
+    window = ControlWindow(sources=lambda: sources, controller=controller,
+        owned_display=lambda: 'own', screen_lookup=lambda _: app.primaryScreen(),
+        affinity=lambda _: True, dependency_probe=lambda: [
+            DependencyStatus('vdd', 'Virtual Display Driver', 'ready', 'Ready')])
+    try:
+        wait_for(app, lambda: bool(window._device_dialog.results))
+        box = window._device_dialog
+        def delayed_probe():
+            release.wait(3)
+            return [DependencyStatus('vdd', 'Virtual Display Driver', 'missing', 'Removed')]
+        box.probe = delayed_probe
+        box.check()
+        window.start_capture()
+        assert not controller.running
+    finally:
+        release.set()
+        wait_for(app, lambda: box.worker is None)
+        window.close()
+
+
 def control_for_test(app, sources, factory, autostart=True, affinity=lambda hwnd: True):
     from hdr_share.stream import StreamController
     target_id = sources[0].id if sources[0].id == 'sdr' else 'b'

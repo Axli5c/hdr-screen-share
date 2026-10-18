@@ -1,6 +1,7 @@
 ﻿param(
     [string]$Selected = '',
     [string]$ReportPath,
+    [string]$VddArchive,
     [ValidateSet('en','ru')][string]$Language = 'en',
     [switch]$LibraryOnly
 )
@@ -100,7 +101,11 @@ function Install-HssComponent {
     $descriptor = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'device-packages.json') -Raw | ConvertFrom-Json).$Component
     $archive = Join-Path $Workspace ($Component + '.zip')
     $extract = Join-Path $Workspace $Component
-    Save-HssDriverArchive -Descriptor $descriptor -Destination $archive
+    if ($Component -eq 'vdd' -and $VddArchive) {
+        $archive = (Resolve-Path -LiteralPath $VddArchive).Path
+    } else {
+        Save-HssDriverArchive -Descriptor $descriptor -Destination $archive
+    }
     Expand-HssVerifiedArchive -Archive $archive -Destination $extract -Descriptor $descriptor
     if ($Component -eq 'vdd') {
         foreach ($name in @('mttvdd.cat','MttVDD.dll')) {
@@ -179,6 +184,8 @@ if (@($results | Where-Object restart).Count) {
     }
 }
 [IO.File]::WriteAllText($ReportPath, ($lines -join "`r`n"), [Text.UTF8Encoding]::new($false))
+$metadata = @{created_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); results=@($results)} | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText(($ReportPath + '.json'), $metadata, [Text.UTF8Encoding]::new($false))
 $failed = @($results | Where-Object { $_.state -eq 'failed' }).Count -gt 0
 $status = if ($failed) { 'failed' } else { 'ok' }
 [IO.File]::WriteAllText(($ReportPath + '.status'), $status, [Text.UTF8Encoding]::new($false))

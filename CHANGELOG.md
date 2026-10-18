@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.5 — 2026-10-18
+
+- Check driver availability at startup and after returning to the app, with per-component readiness and restart guidance.
+- Install either driver from Dependencies, or use official downloads and a verified local VDD ZIP.
+- Detect disabled audio endpoints and broken display drivers; block only the mode whose dependency is unavailable.
+- Use the real Windows system path for elevated Setup helpers and show Windows launch errors.
+- Replace long setup documentation with concise English and Russian guides.
+
 ## 0.2.4 — 2026-10-18
 
 - Added an English/Russian Setup executable with optional automatic VDD and VB-CABLE installation, package verification, existing-driver checks and manual restart guidance. The application binary is unchanged.

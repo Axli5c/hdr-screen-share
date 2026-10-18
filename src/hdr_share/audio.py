@@ -49,6 +49,7 @@ class NativeAudioBridge:
             'ab_list_processes': [C.POINTER(ProcessInfo), C.c_uint32, C.POINTER(C.c_uint32)],
             'ab_list_audio_pids': [C.POINTER(C.c_uint32), C.c_uint32, C.POINTER(C.c_uint32)],
             'ab_list_endpoints': [C.POINTER(EndpointInfo), C.c_uint32, C.POINTER(C.c_uint32)],
+            'ab_list_inactive_endpoints': [C.POINTER(EndpointInfo), C.c_uint32, C.POINTER(C.c_uint32)],
         }
         try:
             for name, arguments in signatures.items():
@@ -81,6 +82,10 @@ class NativeAudioBridge:
     def endpoints(self):
         return [{'id': item.id, 'name': item.name, 'default_roles': item.default_roles}
                 for item in self._list('ab_list_endpoints', EndpointInfo)]
+
+    def inactive_endpoints(self):
+        return [{'id': item.id, 'name': item.name, 'default_roles': item.default_roles}
+                for item in self._list('ab_list_inactive_endpoints', EndpointInfo)]
 
     def processes(self):
         return [ProcessIdentity(item.pid, item.parent_pid, item.created_at, item.image_name)

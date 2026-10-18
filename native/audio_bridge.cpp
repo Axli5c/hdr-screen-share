@@ -246,11 +246,11 @@ struct Relay {
     }
 };
 
-AB_API ab_list_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count) {
+static HRESULT ListEndpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count, DWORD states) {
     try {
         ComScope com; auto enumerator = Enumerator();
         ComPtr<IMMDeviceCollection> devices;
-        Check(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices));
+        Check(enumerator->EnumAudioEndpoints(eRender, states, &devices));
         UINT length = 0; Check(devices->GetCount(&length));
         std::vector<AbEndpointInfo> result;
         std::wstring defaults[3];
@@ -269,6 +269,12 @@ AB_API ab_list_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* co
         }
         return CopyList(result, buffer, capacity, count);
     } catch (const Failure& error) { return error.code; } catch (...) { return E_FAIL; }
+}
+AB_API ab_list_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count) {
+    return ListEndpoints(buffer, capacity, count, DEVICE_STATE_ACTIVE);
+}
+AB_API ab_list_inactive_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count) {
+    return ListEndpoints(buffer, capacity, count, DEVICE_STATE_DISABLED | DEVICE_STATE_UNPLUGGED);
 }
 AB_API ab_list_processes(AbProcessInfo* buffer, uint32_t capacity, uint32_t* count) {
     try { return CopyList(Processes(), buffer, capacity, count); }

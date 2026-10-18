@@ -53,12 +53,12 @@ english.AppInstalled=HDR Screen Share is installed. Choose a monitor and press S
 russian.AppInstalled=HDR Screen Share установлен. Выберите монитор и нажмите Start.
 english.InstallingDrivers=Installing selected drivers...
 russian.InstallingDrivers=Установка выбранных драйверов...
-english.DriverCancelled=HDR Screen Share is installed. Driver setup was cancelled or could not start. Run Setup again to install the drivers.
-russian.DriverCancelled=HDR Screen Share установлен. Установка драйверов отменена или не запустилась. Для установки драйверов запустите установщик ещё раз.
-english.DriverIncomplete=HDR Screen Share is installed. Driver setup did not finish. Run Setup again to retry.
-russian.DriverIncomplete=HDR Screen Share установлен. Установка драйверов не завершилась. Запустите установщик ещё раз.
-english.DriverFailed=Some drivers could not be installed. Run Setup again to retry.
-russian.DriverFailed=Не все драйверы удалось установить. Для повторной попытки запустите установщик ещё раз.
+english.DriverCancelled=HDR Screen Share is installed. Driver setup was cancelled or could not start. Open the app and use Dependencies to install or download the drivers.
+russian.DriverCancelled=HDR Screen Share установлен. Установка драйверов отменена или не запустилась. Откройте приложение и раздел Dependencies для установки или скачивания драйверов.
+english.DriverIncomplete=HDR Screen Share is installed. Driver setup did not finish. Open the app and use Dependencies to retry.
+russian.DriverIncomplete=HDR Screen Share установлен. Установка драйверов не завершилась. Откройте приложение и раздел Dependencies для повторной попытки.
+english.DriverFailed=Some drivers could not be installed. Open Dependencies in the app to check their status and retry.
+russian.DriverFailed=Не все драйверы удалось установить. Откройте Dependencies в приложении для проверки и повторной установки.
 
 [Types]
 Name: "custom"; Description: "{cm:ChooseComponents}"; Flags: iscustom
@@ -87,6 +87,7 @@ Filename: "{app}\HDRScreenShare.exe"; Description: "{cm:OpenApp}"; WorkingDir: "
 
 [UninstallDelete]
 Type: files; Name: "{app}\setup-result.txt"
+Type: files; Name: "{app}\setup-result*.json"
 
 [Code]
 var
@@ -142,8 +143,10 @@ begin
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\setup-components.ps1') + '" -Selected "' + Selected + '" -ReportPath "' + ReportFile + '"';
   if ActiveLanguage = 'russian' then Params := Params + ' -Language ru';
   WizardForm.StatusLabel.Caption := CustomMessage('InstallingDrivers');
-  if not ShellExec('runas', ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe'), Params, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then begin
-    ComponentResult := CustomMessage('DriverCancelled');
+  { ShellExecute delegates to the Windows shell: use the real System32 path,
+    not the Sysnative alias which cannot be resolved by a 64-bit process. }
+  if not ShellExec('runas', ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then begin
+    ComponentResult := CustomMessage('DriverCancelled') + #13#10 + 'Windows ' + IntToStr(Code) + ': ' + SysErrorMessage(Code);
     DriverSetupFailed := True;
     SaveComponentResult;
     Exit;
@@ -153,6 +156,12 @@ begin
   else begin
     ComponentResult := CustomMessage('DriverIncomplete');
     DriverSetupFailed := True;
+  end;
+  { Keep each run: a retry before reboot must not erase a pending restart. }
+  CopyFile(ReportFile + '.json', ExpandConstant('{app}\setup-result-') + ExtractFileName(ExpandConstant('{tmp}')) + '.json', False);
+  if (Code <> 0) and (Code <> 3010) then begin
+    DriverSetupFailed := True;
+    Log('Driver helper exit code: ' + IntToStr(Code));
   end;
   if not LoadStringFromFile(ReportFile + '.status', StatusText) then
     DriverSetupFailed := True

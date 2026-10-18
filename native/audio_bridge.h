@@ -26,6 +26,7 @@ AB_API ab_open(const wchar_t* endpoint_id, AbHandle* out);
 AB_API ab_list_processes(AbProcessInfo* buffer, uint32_t capacity, uint32_t* count);
 AB_API ab_list_audio_pids(uint32_t* buffer, uint32_t capacity, uint32_t* count);
 AB_API ab_list_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count);
+AB_API ab_list_inactive_endpoints(AbEndpointInfo* buffer, uint32_t capacity, uint32_t* count);
 AB_API ab_set_sources(AbHandle handle, const AbProcessInfo* roots, uint32_t count);
 AB_API ab_get_stats(AbHandle handle, AbStats* out);
 AB_API ab_stop(AbHandle handle);

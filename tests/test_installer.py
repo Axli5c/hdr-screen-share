@@ -106,6 +106,30 @@ $report = Join-Path $PSScriptRoot 'report.txt'
     assert result == {'code': code, 'status': status}
 
 
+def test_helper_writes_restart_metadata_even_when_component_fails(tmp_path):
+    result = powershell(tmp_path, f"""
+$report = Join-Path $PSScriptRoot 'report.txt'
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{SCRIPT.as_posix()}' -ReportPath $report -Selected unsupported
+Get-Content -LiteralPath ($report + '.json') -Raw
+""")
+    assert result['created_at'] > 0
+    assert result['results'][0]['state'] == 'failed'
+    assert result['results'][0]['restart'] is False
+
+
+def test_local_vdd_archive_does_not_download_and_is_still_verified(tmp_path):
+    result = powershell(tmp_path, """
+$script:VddArchive = Join-Path $PSScriptRoot 'downloaded.zip'
+[IO.File]::WriteAllText($script:VddArchive, 'tampered')
+function Save-HssDriverArchive { throw 'Unexpected network request' }
+try {
+    Install-HssComponent -Component vdd -Workspace $PSScriptRoot
+    throw 'Tampered local archive accepted'
+} catch { @{message=$_.Exception.Message} | ConvertTo-Json }
+""")
+    assert 'SHA-256 mismatch' in result['message']
+
+
 @pytest.mark.parametrize('exit_code,accepted', [(0, True), (3010, True), (1, False), (-1, False)])
 def test_driver_exit_codes_are_not_silently_ignored(tmp_path, exit_code, accepted):
     result = powershell(tmp_path, f"""

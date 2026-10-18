@@ -39,13 +39,15 @@ def main():
     logging.basicConfig(level=logging.INFO, handlers=[RotatingFileHandler(
         logdir / "app.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")])
     enable_physical_pixels()
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
     from .ui import ControlWindow
+    from .device_setup import probe_dependencies
     app = QApplication(sys.argv[:1])
     app.setApplicationName("HDR Screen Share")
     app.setQuitOnLastWindowClosed(False)
-    window = ControlWindow(default_mode=args.mode, autostart=bool(args.smoke_seconds))
+    window = ControlWindow(default_mode=args.mode, autostart=bool(args.smoke_seconds),
+                           dependency_probe=None if args.smoke_seconds else probe_dependencies)
     window.compare_toggle.setChecked(args.compare_preview)
     window.show()
     # Explicit quit follows successful worker shutdown, never the invisible output window.
@@ -78,7 +80,13 @@ def main():
                 window.grab().save(str(args.diagnostics.with_suffix(".png")))
             window.close()
         QTimer.singleShot(args.smoke_seconds * 1000, finish)
-    return app.exec()
+    result = app.exec()
+    # Release dialog callback cycles and finished worker objects before Python
+    # starts destroying QApplication and native Qt wrappers.
+    window.deleteLater()
+    window.output.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return result
 
 
 if __name__ == "__main__":

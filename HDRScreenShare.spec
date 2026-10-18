@@ -5,6 +5,7 @@ datas, binaries, hiddenimports = collect_all('hdrcapture')
 binaries.append(('build/native/audio_bridge.dll', '.'))
 binaries.append(('build/native/video_presenter.dll', '.'))
 datas += [('scripts/install-devices.ps1', 'scripts'),
+          ('scripts/setup-components.ps1', 'scripts'),
           ('scripts/vdd-config.ps1', 'scripts'),
           ('scripts/device-packages.json', 'scripts')]
 a = Analysis(['app.py'], pathex=['src'], binaries=binaries, datas=datas,

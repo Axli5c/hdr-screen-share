@@ -153,6 +153,25 @@ class WindowsDisplayBackend:
     @staticmethod
     def registered():
         return owned_device_registered()
+
+    @staticmethod
+    def problem_code():
+        """Read the present devnode, not just persistent ownership registry keys."""
+        cfg = C.WinDLL('cfgmgr32', use_last_error=True)
+        cfg.CM_Locate_DevNodeW.argtypes = [C.POINTER(W.DWORD), W.LPWSTR, W.ULONG]
+        cfg.CM_Locate_DevNodeW.restype = W.ULONG
+        cfg.CM_Get_DevNode_Status.argtypes = [C.POINTER(W.ULONG), C.POINTER(W.ULONG), W.DWORD, W.ULONG]
+        cfg.CM_Get_DevNode_Status.restype = W.ULONG
+        node, status, problem = W.DWORD(), W.ULONG(), W.ULONG()
+        code = cfg.CM_Locate_DevNodeW(C.byref(node), OWN_INSTANCE, 0)
+        if code == 0x0D:  # CR_NO_SUCH_DEVNODE
+            return None
+        if code:
+            raise DisplayLeaseError(f'Cannot locate device (Configuration Manager {code})')
+        code = cfg.CM_Get_DevNode_Status(C.byref(status), C.byref(problem), node, 0)
+        if code:
+            raise DisplayLeaseError(f'Cannot query device (Configuration Manager {code})')
+        return problem.value
     def __init__(self):
         self._mutex = None
         self._guard = None

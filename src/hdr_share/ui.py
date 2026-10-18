@@ -1,7 +1,7 @@
 import time
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 from PySide6.QtGui import QImage, QPainter, QColor, QColorSpace
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QComboBox, QPushButton, QCheckBox)
@@ -183,11 +183,15 @@ class ControlWindow(QWidget):
 
     def __init__(self, *, sources=list_sources, worker_factory=CaptureWorker,
                  screen_lookup=screen_for_source, autostart=False, controller=None,
-                 owned_display=None, affinity=exclude_control_from_capture, default_mode="screen"):
+                 owned_display=None, affinity=exclude_control_from_capture, default_mode="screen",
+                 dependency_probe=None):
         super().__init__()
         from .stream import StreamController
         from .virtual_display import WindowsDisplayBackend
         self._sources, self._screen_lookup = sources, screen_lookup
+        self._dependency_probe = dependency_probe
+        self._device_dialog = None
+        self._startup_dependency_check = dependency_probe is not None
         self._owned_display = owned_display or WindowsDisplayBackend().owned_display
         self._affinity = affinity
         self._affinity_set = False
@@ -278,7 +282,7 @@ class ControlWindow(QWidget):
         self.instruction.setWordWrap(True)
         self.instruction.setObjectName("hint")
         layout.addWidget(self.instruction)
-        self.devices_button = QPushButton("Devices")
+        self.devices_button = QPushButton("Dependencies")
         layout.addWidget(self.devices_button)
         self.start_button.clicked.connect(self.start_capture)
         self.stop_button.clicked.connect(self.stop_capture)
@@ -300,6 +304,9 @@ class ControlWindow(QWidget):
         app.screenRemoved.connect(self.display_changed)
         app.screenAdded.connect(self.display_changed)
         self.refresh_sources()
+        if dependency_probe is not None:
+            self.devices_button.setText('Dependencies · Checking…')
+            self.prepare_dependencies()
         if autostart:
             QTimer.singleShot(0, self.start_capture)
 
@@ -389,6 +396,13 @@ class ControlWindow(QWidget):
             self.start_capture()
 
     def start_capture(self):
+        if self._dependency_probe is not None:
+            box = self.prepare_dependencies()
+            required = 'vdd' if self.share_mode.currentData() == 'screen' else 'vbcable'
+            if box.busy or box.worker is not None or not box.results or any(item.component == required and not item.ready for item in box.results):
+                self.stop_capture()
+                self.show_devices()
+                return
         source_id = self.monitors.currentData()
         if source_id is None:
             return
@@ -452,10 +466,29 @@ class ControlWindow(QWidget):
             self._last_counts = (worker.captured, self.output.presented)
             self._last_stats_at = now
 
-    def show_devices(self):
+    def prepare_dependencies(self):
         from .device_setup import DeviceSetupDialog
-        box = DeviceSetupDialog(self, before_install=self.stop_capture, mode=self.share_mode.currentData())
-        box.exec()
+        if self._device_dialog is None:
+            options = {'probe': self._dependency_probe} if self._dependency_probe is not None else {}
+            self._device_dialog = DeviceSetupDialog(self, before_install=self.stop_capture,
+                                                    mode=self.share_mode.currentData(), **options)
+            self._device_dialog.checked.connect(self.dependencies_checked)
+        return self._device_dialog
+
+    def dependencies_checked(self, results):
+        ready = all(item.ready for item in results)
+        self.devices_button.setText('Dependencies · ✓ Ready' if ready else 'Dependencies · ⚠ Check setup')
+        if self._startup_dependency_check:
+            self._startup_dependency_check = False
+            if not ready:
+                self._device_dialog.show()
+
+    def show_devices(self):
+        box = self.prepare_dependencies()
+        box.show()
+        box.raise_()
+        box.activateWindow()
+        box.check()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -466,8 +499,19 @@ class ControlWindow(QWidget):
                 self.device_status.setText("Preview unavailable")
                 self.device_status.show()
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if (event.type() == QEvent.Type.ActivationChange and self.isActiveWindow()
+                and getattr(self, '_device_dialog', None) is not None):
+            self._device_dialog.check()
+
     def closeEvent(self, event):
+        if self._device_dialog is not None and (self._device_dialog.busy or self._device_dialog.worker is not None):
+            event.ignore()
+            return
         if self.stop_capture():
+            if self._device_dialog is not None:
+                self._device_dialog.close()
             self.preview_timer.stop()
             self.output.close()
             event.accept()
