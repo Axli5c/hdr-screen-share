@@ -26,7 +26,10 @@ class GitHub:
         return json.loads(result.stdout) if result.stdout.strip() else None
 
     def release(self, repo, tag):
-        return self.call('api', f'repos/{repo}/releases/tags/{tag}')
+        # REST's tag endpoint only resolves published releases. gh can also find
+        # drafts, whose numeric ID works with the asset verification API.
+        release = self.call('release', 'view', tag, '--repo', repo, '--json', 'databaseId')
+        return self.call('api', f"repos/{repo}/releases/{release['databaseId']}")
 
     def upload(self, repo, tag, path):
         self.call('release', 'upload', tag, str(path), '--repo', repo)

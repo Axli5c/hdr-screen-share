@@ -6,6 +6,19 @@ import pytest
 from tools.publish_release import publish
 
 
+def test_draft_release_is_resolved_by_id_instead_of_published_tag_endpoint(monkeypatch):
+    from tools.publish_release import GitHub
+    def api(*args, **kwargs):
+        if args == ('release', 'view', 'v0.2.5', '--repo', 'owner/repo', '--json', 'databaseId'):
+            return {'databaseId': 42}
+        if args == ('api', 'repos/owner/repo/releases/42'):
+            return {'draft': True, 'assets': [{'id': 7, 'state': 'uploaded'}]}
+        raise RuntimeError('Not Found (HTTP 404): draft unavailable by tag')
+    github = GitHub()
+    monkeypatch.setattr(github, 'call', api)
+    assert github.release('owner/repo', 'v0.2.5')['assets'] == [{'id': 7, 'state': 'uploaded'}]
+
+
 class FakeGitHub:
     def __init__(self, fail_upload=None, corrupt=False, fail_promotion=False):
         self.assets = []
