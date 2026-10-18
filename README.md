@@ -11,7 +11,7 @@ Windows x64 · Python + Direct3D/WASAPI · MIT · Preview
 ## Install with Setup
 
 1. Open [release v0.2.4](https://github.com/Axli5c/hdr-screen-share/releases/tag/v0.2.4) and download **HDRScreenShare-Setup-v0.2.4-windows-x64.exe** under **Assets**.
-2. Run Setup and choose the installation folder. The interface is English.
+2. Run Setup, choose **English** or **Русский**, then choose the installation folder. The application itself uses English.
 3. On **Select Components**, keep **HDR Screen Share** selected. Python and all application libraries are included.
 4. Tick **Virtual Display Driver** for **Virtual screen**, or **VB-CABLE by VB-Audio** for sound in **Application window**. Select both if you use both modes. Both optional checkboxes are off by default.
 5. Click **Install**. Selected drivers are downloaded from their publishers, checked using pinned SHA-256 hashes and digital signatures, then installed after Windows UAC approval. Working installed components are skipped. Internet access is needed only for missing selected drivers.

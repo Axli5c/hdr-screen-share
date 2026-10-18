@@ -2,7 +2,7 @@
 
 ## 0.2.4 — 2026-10-18
 
-- Added an English Setup executable with optional automatic VDD and VB-CABLE installation, package verification, existing-driver checks and manual restart guidance. The application binary is unchanged.
+- Added an English/Russian Setup executable with optional automatic VDD and VB-CABLE installation, package verification, existing-driver checks and manual restart guidance. The application binary is unchanged.
 - Application window uses a Direct3D SDR output outside the visible desktop.
 - Application window no longer enables a virtual monitor, requires its driver, or requests UAC.
 - Virtual screen retains its dedicated virtual display and automatic cleanup.

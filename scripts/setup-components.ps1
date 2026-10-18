@@ -1,6 +1,7 @@
-param(
+﻿param(
     [string]$Selected = '',
     [string]$ReportPath,
+    [ValidateSet('en','ru')][string]$Language = 'en',
     [switch]$LibraryOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -152,14 +153,30 @@ try {
         Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-$lines = @('HDR Screen Share installed.')
+$russian = $Language -eq 'ru'
+$lines = @(if ($russian) { 'HDR Screen Share установлен.' } else { 'HDR Screen Share installed.' })
 foreach ($result in $results) {
-    $name = if ($result.component -eq 'vdd') { 'Virtual Display Driver' } else { 'VB-CABLE' }
-    $lines += "$name`: $($result.state). $($result.message)".Trim()
+    $name = if ($result.component -eq 'vdd') {
+        if ($russian) { 'Драйвер виртуального дисплея' } else { 'Virtual Display Driver' }
+    } else { 'VB-CABLE' }
+    $state = $result.state
+    if ($russian) {
+        $state = switch ($state) {
+            'installed' { 'установлен' }
+            'already-installed' { 'уже установлен' }
+            default { 'ошибка установки' }
+        }
+    }
+    $lines += "$name`: $state. $($result.message)".Trim()
 }
 if (@($results | Where-Object restart).Count) {
-    $lines += 'Restart Windows before using the new driver.'
-    $lines += 'Keep your headphones as the default output and your microphone as the default input.'
+    if ($russian) {
+        $lines += 'Перезагрузите Windows перед использованием нового драйвера.'
+        $lines += 'Оставьте наушники выводом по умолчанию, а микрофон — входом по умолчанию.'
+    } else {
+        $lines += 'Restart Windows before using the new driver.'
+        $lines += 'Keep your headphones as the default output and your microphone as the default input.'
+    }
 }
 [IO.File]::WriteAllText($ReportPath, ($lines -join "`r`n"), [Text.UTF8Encoding]::new($false))
 $failed = @($results | Where-Object { $_.state -eq 'failed' }).Count -gt 0
