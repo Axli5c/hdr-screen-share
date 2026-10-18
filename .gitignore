@@ -1,6 +1,11 @@
 .venv/
 .scratch/
 .superpowers/
+docs/superpowers/
+.agents/
+.codex/
+AGENTS.md
+CLAUDE.md
 __pycache__/
 .pytest_cache/
 *.egg-info/

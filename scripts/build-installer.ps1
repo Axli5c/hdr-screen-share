@@ -22,7 +22,6 @@ foreach ($name in @('README.md','README.ru.md','CHANGELOG.md','LICENSE','THIRD_P
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $portable
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses/inno-setup-LICENSE.txt') -Destination (Join-Path $portable 'licenses/inno-setup-LICENSE.txt')
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/verification-installer.md') -Destination (Join-Path $portable 'docs/verification-installer.md')
 & $Compiler "/DAppVersion=$version" (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
 $output = Join-Path $projectRoot "dist/releases/HDRScreenShare-Setup-v$version-windows-x64.exe"

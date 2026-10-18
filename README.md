@@ -20,7 +20,7 @@ Windows x64 · Python + Direct3D/WASAPI · MIT · Preview
 
 The application installs for the current user; only driver setup requires administrator approval. Driver setup errors do not remove the application. The last page shows which component failed; details are saved in `setup-result.txt` in the application folder. Run Setup again and select the missing component to retry.
 
-Installer checks: [verification results](docs/verification-installer.md). Installation of missing drivers on a clean Windows system has not yet been validated.
+Installation of missing drivers on a clean Windows system has not yet been validated.
 
 VB-CABLE is donationware by [VB-Audio](https://vb-audio.com/Cable/); support the author if you find it useful. [Vendor licensing](https://vb-audio.com/Services/licensing.htm) applies separately from this project's MIT license.
 
@@ -118,7 +118,7 @@ Discord controls system audio and screen captions in Virtual screen mode. The ap
 
 This is a preview release. End-to-end Discord picker/viewer delivery, audio/video drift and HDR 4K60 have not yet been validated. A changing synthetic 4K window and local 2560×1440 HDR captures were checked; these checks do not establish 4K60 streaming performance.
 
-Validation records: [v0.2.4](docs/verification-v024.md), [v0.2.3](docs/verification-v023.md), [v0.2.1](docs/verification-v021.md), [v0.2.0](docs/verification-v2.md). Ordinary use does not save frames or audio. App log: `%LOCALAPPDATA%/HDRScreenShare/app.log`.
+Ordinary use does not save frames or audio. App log: `%LOCALAPPDATA%/HDRScreenShare/app.log`.
 
 ## Build
 
