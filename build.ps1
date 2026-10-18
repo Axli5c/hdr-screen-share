@@ -17,6 +17,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки PyInstaller' }
     Copy-Item -LiteralPath 'README.md','README.ru.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination 'dist/HDRScreenShare'
     Copy-Item -LiteralPath 'licenses' -Destination 'dist/HDRScreenShare' -Recurse -Force
+    $runtimeLicense = & $pythonExe -c "import sys; from pathlib import Path; print(Path(sys.base_prefix) / 'LICENSE.txt')"
+    if (Test-Path -LiteralPath $runtimeLicense) {
+        Copy-Item -LiteralPath $runtimeLicense -Destination 'dist/HDRScreenShare/licenses/python-LICENSE.txt'
+    }
     Write-Output (Join-Path $PSScriptRoot 'dist/HDRScreenShare/HDRScreenShare.exe')
 }
 finally { Pop-Location }
