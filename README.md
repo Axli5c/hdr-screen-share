@@ -1,5 +1,7 @@
 # HDR Screen Share 0.2.4
 
+English · [Русский](README.ru.md)
+
 Convert an HDR monitor to SDR for Discord while keeping local HDR enabled.
 
 Windows x64 · Python + Direct3D/WASAPI · MIT · Preview

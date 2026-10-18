@@ -15,7 +15,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Ошибка проверки Python' }
     & $pythonExe -m PyInstaller --noconfirm HDRScreenShare.spec
     if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки PyInstaller' }
-    Copy-Item -LiteralPath 'README.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination 'dist/HDRScreenShare'
+    Copy-Item -LiteralPath 'README.md','README.ru.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination 'dist/HDRScreenShare'
     Copy-Item -LiteralPath 'licenses' -Destination 'dist/HDRScreenShare' -Recurse -Force
     New-Item -ItemType Directory -Force -Path 'dist/HDRScreenShare/docs' | Out-Null
     Copy-Item -LiteralPath 'docs/verification.md' -Destination 'dist/HDRScreenShare/docs'
