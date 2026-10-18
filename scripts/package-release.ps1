@@ -16,8 +16,12 @@ foreach ($name in @('README.md', 'README.ru.md', 'CHANGELOG.md', 'LICENSE', 'THI
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $archive = Join-Path $OutputDirectory "HDRScreenShare-v$version-windows-x64.zip"
 Compress-Archive -LiteralPath $portable -DestinationPath $archive -Force
-$digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumPath = Join-Path $OutputDirectory 'SHA256SUMS.txt'
-[IO.File]::WriteAllText($checksumPath, "$digest  $([IO.Path]::GetFileName($archive))`n", [Text.UTF8Encoding]::new($false))
+$lines = @(Get-ChildItem -LiteralPath $OutputDirectory -File | Where-Object {
+    $_.Name -eq "HDRScreenShare-v$version-windows-x64.zip" -or $_.Name -eq "HDRScreenShare-Setup-v$version-windows-x64.exe"
+} | Sort-Object Name | ForEach-Object {
+    "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+})
+[IO.File]::WriteAllText($checksumPath, ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
 Write-Output $archive
 Write-Output $checksumPath

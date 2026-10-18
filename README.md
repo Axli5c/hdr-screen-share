@@ -8,7 +8,25 @@ Windows x64 · Python + Direct3D/WASAPI · MIT · Preview
 
 [Download](https://github.com/Axli5c/hdr-screen-share/releases/tag/v0.2.4) · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v0.2.4.md) · [License](LICENSE)
 
-## Install the ready-to-run application
+## Install with Setup
+
+1. Open [release v0.2.4](https://github.com/Axli5c/hdr-screen-share/releases/tag/v0.2.4) and download **HDRScreenShare-Setup-v0.2.4-windows-x64.exe** under **Assets**.
+2. Run Setup and choose the installation folder. The interface is English.
+3. On **Select Components**, keep **HDR Screen Share** selected. Python and all application libraries are included.
+4. Tick **Virtual Display Driver** for **Virtual screen**, or **VB-CABLE by VB-Audio** for sound in **Application window**. Select both if you use both modes. Both optional checkboxes are off by default.
+5. Click **Install**. Selected drivers are downloaded from their publishers, checked using pinned SHA-256 hashes and digital signatures, then installed after Windows UAC approval. Working installed components are skipped. Internet access is needed only for missing selected drivers.
+6. Read the result on the last page. If VB-CABLE was installed, restart Windows manually before using its sound. Keep headphones as the default Windows output and your microphone as the input. Setup does not restart Windows automatically.
+7. Open **HDR Screen Share** from Start, select a monitor and press **Start** when ready.
+
+The application installs for the current user; only driver setup requires administrator approval. Driver setup errors do not remove the application. The last page shows which component failed; details are saved in `setup-result.txt` in the application folder. Run Setup again and select the missing component to retry.
+
+Installer checks: [verification results](docs/verification-installer.md). Installation of missing drivers on a clean Windows system has not yet been validated.
+
+VB-CABLE is donationware by [VB-Audio](https://vb-audio.com/Cable/); support the author if you find it useful. [Vendor licensing](https://vb-audio.com/Services/licensing.htm) applies separately from this project's MIT license.
+
+Uninstall HDR Screen Share through **Windows Settings → Apps → Installed apps**. Shared drivers are retained. The virtual display stays disabled while the application is stopped. VB-CABLE can be removed through its original vendor installer.
+
+## Portable ZIP
 
 1. Open [release v0.2.4](https://github.com/Axli5c/hdr-screen-share/releases/tag/v0.2.4).
 2. Under **Assets**, download **HDRScreenShare-v0.2.4-windows-x64.zip**. The **Source code** archives are for development and do not contain the ready-to-run program.
@@ -17,7 +35,7 @@ Windows x64 · Python + Direct3D/WASAPI · MIT · Preview
 5. Keep the entire folder together. `_internal` contains the bundled runtime, libraries and native modules; copying only the EXE is not enough.
 6. Choose a sharing mode and complete its setup below. The application opens idle and starts processing only after **Start**.
 
-There is no separate application installer. For normal use, do not install Python, run pip, or build the source code. The interface is in English.
+For normal use, do not install Python, run pip, or build the source code. The interface is in English. Use the Setup above if you want optional drivers installed automatically.
 
 Use `SHA256SUMS.txt` from the same release to verify the ZIP:
 
@@ -35,8 +53,8 @@ Get-FileHash .\HDRScreenShare-v0.2.4-windows-x64.zip -Algorithm SHA256
 | Python, PySide6/Qt, NumPy, hdrcapture | No. These are included in the portable folder. |
 | Native audio/video modules and C/C++ runtime files | Included in the portable folder. Keep `_internal` intact. |
 | Direct3D and WASAPI | Windows components; no separate package is needed. |
-| VB-CABLE | Only for filtered sound in **Application window**. Installed separately; instructions below. Video can run without it, with an Audio unavailable status. |
-| Virtual display driver | Only for **Virtual screen**. Install through the application's **Devices** dialog; instructions below. |
+| VB-CABLE | Only for filtered sound in **Application window**. Select it in Setup, or install manually below. Video can run without it, with an Audio unavailable status. |
+| Virtual display driver | Only for **Virtual screen**. Select it in Setup, or install through the application's **Devices** dialog below. |
 
 MSVC Build Tools, a Windows SDK and development Python packages are needed only when building from source, not when using the release ZIP.
 
@@ -117,9 +135,10 @@ Create the release ZIP and checksum after building:
 
 ```powershell
 ./scripts/package-release.ps1
+./scripts/build-installer.ps1 -Compiler 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
 ```
 
-Artifacts are written to `dist/releases`. Build products, development environments, local scratch files and logs are excluded from Git.
+Building Setup additionally requires [Inno Setup 6.7 or newer](https://jrsoftware.org/isdl.php). Artifacts and their SHA-256 checksums are written to `dist/releases`. Build products, development environments, local scratch files and logs are excluded from Git.
 
 Source launch: `./run.ps1`. Diagnostic tools do not start Discord sharing:
 
